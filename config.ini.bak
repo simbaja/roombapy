@@ -1,0 +1,13 @@
+[10.7.0.194]
+blid = 3117450421027590
+password = b'YUCOIc5LurEB5es5'
+data = {'hostname': 'Roomba-3117450421027590',
+	 'ip': '10.7.0.194',
+	 'mac': 'F0:03:8C:1E:7C:5C',
+	 'nc': 0,
+	 'proto': 'mqtt',
+	 'robotname': 'Nimbus',
+	 'sku': 'R980040',
+	 'sw': 'v2.2.9-1',
+	 'ver': '2'}
+

@@ -1,46 +1,19 @@
-from __future__ import print_function
-from ast import literal_eval
-from logging.handlers import RotatingFileHandler
-from roomba import roomba
-from roomba.password import Password
 import argparse
+import configparser
 import json
 import logging
 import os
-import six
 import socket
 import sys
 import time
+from ast import literal_eval
+from logging.handlers import RotatingFileHandler
 
-# Import trickery
-global HAVE_CV2
-global HAVE_MQTT
-global HAVE_PIL
-try:
-    import configparser
-except:
-    from six.moves import configparser
-try:
-    import paho.mqtt.client as mqtt
+import six
 
-    HAVE_MQTT = True
-except ImportError:
-    print("paho mqtt client not found")
-try:
-    import cv2
-
-    HAVE_CV2 = True
-except ImportError:
-    print("CV or numpy module not found, falling back to PIL")
-
-# NOTE: MUST use Pillow Pillow 4.1.1 to avoid some horrible memory leaks in the
-# text handling!
-try:
-    from PIL import Image
-
-    HAVE_PIL = True
-except ImportError:
-    print("PIL module not found, maps are disabled")
+import paho.mqtt.client as mqtt
+from roomba import roomba
+from roomba.password import Password
 
 
 def parse_args():
@@ -213,48 +186,6 @@ def parse_args():
         help="Disconnect period for non-continuous connection (default: " "1000ms)",
     )
     parser.add_argument(
-        "-m",
-        "--drawmap",
-        action="store_false",
-        default=True,
-        help="Draw Roomba cleaning map (default: True)",
-    )
-    parser.add_argument(
-        "-M",
-        "--mapPath",
-        action="store",
-        type=str,
-        default=".",
-        help="Location to store maps to (default: .)",
-    )
-    parser.add_argument(
-        "-s",
-        "--mapSize",
-        action="store",
-        type=str,
-        default="(800,1500,0,0,0,0)",
-        help="Map Size, Dock offset and skew for the map. (800,1500) is the "
-        "size, (0,0) is the dock location, in the center of the map, 0 "
-        "is the rotation of the map, 0 is the rotation of the roomba. "
-        "Use single quotes around the string. (default: "
-        '"(800,1500,0,0,0,0)")',
-    )
-    parser.add_argument(
-        "-I",
-        "--iconPath",
-        action="store",
-        type=str,
-        default=default_icon_path,
-        help='location of icons. (default: "./")',
-    )
-    parser.add_argument(
-        "-o",
-        "--roomOutline",
-        action="store_false",
-        default=True,
-        help="Draw room outline (default: True)",
-    )
-    parser.add_argument(
         "-x",
         "--exclude",
         action="store",
@@ -357,103 +288,6 @@ def main():
             log.warn("Error reading config file %s" % e)
         return roombas
 
-    def create_html(myroomba, mapPath="."):
-        """
-        Create html files for live display of roomba maps - but only if they
-        don't already exist
-        """
-        # default css and html
-        css = """body {
-    background-color: white;
-    color: white;
-    margin: 0;
-    padding: 0;
-    }
-img,video {
-    width: auto;
-    max-height:100%;
-    }
-"""
-        html = """<!DOCTYPE html>
-<html>
-<head>
-<link href="style.css" rel="stylesheet" type="text/css">
-</head>
-<script>
-
-function refresh(node)
-{
-   var times = 1000; // gap in Milli Seconds;
-
-   (function startRefresh()
-   {
-      var address;
-      if(node.src.indexOf('?')>-1)
-       address = node.src.split('?')[0];
-      else
-       address = node.src;
-      node.src = address+"?time="+new Date().getTime();
-
-      setTimeout(startRefresh,times);
-   })();
-
-}
-
-window.onload = function()
-{
-  var node = document.getElementById('img');
-  refresh(node);
-  // you can refresh as many images you want just repeat above steps
-}
-</script>
-
-<body>
-"""
-        html += (
-            '<img id="img" src="%smap.png" alt="Roomba Map Live" style="position:absolute;top:0;left:0"/>'
-            % myroomba.roombaName
-        )
-        html += """
-</body>
-</html>
-"""
-        # python 3 workaround
-        try:
-            FileNotFoundError
-        except NameError:
-            # py2
-            FileNotFoundError = PermissionError = IOError
-
-        # check is style.css exists, if not create it
-        css_path = mapPath + "/style.css"
-        try:
-            fn = open(css_path, "r")  # check if file exists (or is readable)
-            fn.close()
-        except (IOError, FileNotFoundError):
-            log.warn("CSS file not found, creating %s" % css_path)
-            try:
-                with open(css_path, "w") as fn:
-                    fn.write(css)
-            except (IOError, PermissionError) as e:
-                log.error("unable to create file %s, error: %s" % css_path, e)
-        # check is html exists, if not create it
-        html_path = mapPath + "/" + myroomba.roombaName + "roomba_map.html"
-        try:
-            fn = open(html_path, "r")  # check if file exists (or is readable)
-            fn.close()
-        except (IOError, FileNotFoundError):
-            log.warn("html file not found, creating %s" % html_path)
-            try:
-                with open(html_path, "w") as fn:
-                    fn.write(html)
-                make_executable(html_path)
-            except (IOError, PermissionError) as e:
-                log.error("unable to create file %s, error: %s" % html_path, e)
-
-    def make_executable(path):
-        mode = os.stat(path).st_mode
-        mode |= (mode & 0o444) >> 2  # copy R bits to X
-        os.chmod(path, mode)
 
     def setup_logger(logger_name, log_file, level=logging.DEBUG, console=False):
         try:
@@ -497,51 +331,6 @@ window.onload = function()
     setup_logger(__name__, arg.log, level=log_level, console=arg.echo)
 
     log = logging.getLogger(__name__)
-
-    log.info("*******************")
-    log.info("* Program Started *")
-    log.info("*******************")
-
-    log.info("Roomba.py Version: %s" % roomba.__version__)
-
-    log.info("Python Version: %s" % sys.version.replace("\n", ""))
-
-    if HAVE_MQTT:
-        import paho.mqtt  # bit of a kludge, just to get the version number
-
-        log.info("Paho MQTT Version: %s" % paho.mqtt.__version__)
-        if (
-            sys.version_info.major == 2
-            and sys.version_info.minor == 7
-            and sys.version_info.micro < 9
-            and int(paho.mqtt.__version__.split(".")[0]) >= 1
-            and int(paho.mqtt.__version__.split(".")[1]) > 2
-        ):
-            log.error(
-                "NOTE: if your python version is less than 2.7.9, "
-                "and Paho MQTT verion is not 1.2.3 or lower, this "
-                "program will NOT WORK"
-            )
-            log.error(
-                "Please use <sudo> pip install paho-mqtt==1.2.3 to "
-                "downgrade paho-mqtt, or use a later version of python"
-            )
-            sys.exit(1)
-
-    if HAVE_CV2:
-        log.info("CV Version: %s" % cv2.__version__)
-
-    if HAVE_PIL:
-        import PIL  # bit of a kludge, just to get the version number
-
-        log.info("PIL Version: %s" % PIL.__version__)
-        if int(PIL.__version__.split(".")[0]) < 4:
-            log.warn(
-                "WARNING: PIL version is %s, this is not the latest! "
-                "You can get bad memory leaks with old versions of PIL"
-                % Image.PILLOW_VERSION
-            )
-            log.warn("run: 'pip install --upgrade pillow' to fix this")
 
     log.debug("-- DEBUG Mode ON -")
     log.info("<CNTRL C> to Exit")
@@ -631,8 +420,6 @@ window.onload = function()
 
     for myroomba in roomba_list:
         log.info("connecting Roomba %s" % myroomba.address)
-        # auto create html files (if they don't exist)
-        create_html(myroomba, arg.mapPath)
         # all these are optional, if you don't include them, the defaults
         # will work just fine
         if arg.exclude != "":
@@ -642,15 +429,6 @@ window.onload = function()
         )
         if not arg.continuous:
             myroomba.delay = arg.delay // 1000
-        if arg.mapSize != "" and arg.mapPath != "":
-            # enable live maps, class default is no maps
-            myroomba.enable_map(
-                enable=True,
-                mapSize=arg.mapSize,
-                mapPath=arg.mapPath,
-                iconPath=arg.iconPath,
-                roomOutline=arg.roomOutline,
-            )
         if arg.broker is not None:
             # if you want to publish Roomba data to your own mqtt broker
             # (default is not to) if you have more than one roomba, and
