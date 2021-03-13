@@ -14,11 +14,11 @@ class RoombaPassword:
     server_socket = None
     log = None
 
-    def __init__(self, roomba_ip):
+    def __init__(self, roomba_ip, ciphers="DEFAULT@SECLEVEL=1"):
         """Init default values."""
         self.roomba_ip = roomba_ip
         self.message = bytes.fromhex("f005efcc3b2900")
-        self.server_socket = _get_socket()
+        self.server_socket = _get_socket(ciphers=ciphers)
         self.log = logging.getLogger(__name__)
 
     """
@@ -75,12 +75,12 @@ def _decode_password(data):
     return str(data[7:].decode().rstrip("\x00"))
 
 
-def _get_socket():
+def _get_socket(ciphers="DEFAULT@SECLEVEL=1"):
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.settimeout(10)
     ssl_socket = ssl.wrap_socket(
         server_socket,
         ssl_version=ssl.PROTOCOL_TLS,
-        ciphers="DEFAULT@SECLEVEL=1",
+        ciphers=ciphers,
     )
     return ssl_socket

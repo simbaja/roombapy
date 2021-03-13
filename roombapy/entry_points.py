@@ -1,3 +1,4 @@
+import ssl
 import sys
 
 from roombapy import RoombaFactory
@@ -27,10 +28,18 @@ def password():
     roomba_info = roomba_discovery.find(roomba_ip)
     _validate_roomba_info(roomba_info)
 
-    roomba_password = RoombaPassword(roomba_ip)
-    found_password = roomba_password.get_password()
-    roomba_info.password = found_password
-    print(roomba_info)
+    for ciphers in ["DEFAULT@SECLEVEL=1", "DEFAULT:!DH"]:
+        try:
+            roomba_password = RoombaPassword(roomba_ip, ciphers=ciphers)
+            found_password = roomba_password.get_password()
+            roomba_info.password = found_password
+            print(roomba_info)
+            return
+        except ssl.SSLError:
+            print(
+                f"Failed to connect to roomba using ciphers={ciphers}",
+                file=sys.stderr,
+            )
 
 
 def connect():
