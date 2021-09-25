@@ -15,7 +15,7 @@ enabling/disabling of room outline drawing, added auto creation of css/html
 files Nick Waterton 11th July  2017  V1.2.1: Quick (untested) fix for room
 outlines if you don't have OpenCV
 """
-
+import datetime
 import json
 import logging
 import threading
@@ -25,6 +25,7 @@ from collections.abc import Mapping
 from datetime import datetime
 
 from roombapy.const import ROOMBA_ERROR_MESSAGES, ROOMBA_STATES
+from roombapy.roomba_mapper import RoombaMapper
 
 MAX_CONNECTION_RETRIES = 3
 
@@ -72,22 +73,119 @@ class Roomba:
         self.roomba_connected = False
         self.indent = 0
         self.master_indent = 0
-        self.co_ords = {"x": 0, "y": 0, "theta": 180}
-        self.cleanMissionStatus_phase = ""
-        self.previous_cleanMissionStatus_phase = ""
+        self.invert_x = self.invert_y = None    #mirror x,y
         self.current_state = None
-        self.bin_full = False
         self.master_state = {}  # all info from roomba stored here
         self.time = time.time()
-        self.update_seconds = 300  # update with all values every 5 minutes
         self._thread = threading.Thread(
             target=self.periodic_connection, name="roombapy"
         )
         self.on_message_callbacks = []
         self.on_disconnect_callbacks = []
-        self.error_code = None
-        self.error_message = None
         self.client_error = None
+
+        self.mapper = RoombaMapper(self)
+        self.history = {}
+        self.timers = {}
+        self.flags = {}   
+
+    @property    
+    def co_ords(self):
+        co_ords = self.pose
+        if isinstance(co_ords, dict):
+            return {'x': -co_ords['point']['y'] if self.invert_x else co_ords['point']['y'],
+                    'y': -co_ords['point']['x'] if self.invert_y else co_ords['point']['x'],
+                    'theta':co_ords['theta']}
+        return self.zero_coords()
+        
+    @property
+    def error_num(self):
+        try:
+            return self.cleanMissionStatus.get('error')
+        except AttributeError:
+            pass
+        return 0
+        
+    @property
+    def error_message(self):
+        return self.get_error_message(self.error_num)
+        
+    @property
+    def cleanMissionStatus(self):
+        return self.get_property("cleanMissionStatus")
+        
+    @property
+    def pose(self):
+        return self.get_property("pose")
+        
+    @property
+    def batPct(self):
+        return self.get_property("batPct")
+                 
+    @property
+    def bin_full(self):
+        return self.get_property("bin_full")
+        
+    @property
+    def tanklvl(self):
+        return self.get_property("tankLvl")
+        
+    @property
+    def rechrgM(self):
+        return self.get_property("rechrgM")
+        
+    def calc_mssM(self):
+        start_time = self.get_property("mssnStrtTm")
+        if start_time:
+            return int((datetime.datetime.now() - datetime.datetime.fromtimestamp(start_time)).total_seconds()//60)
+        start = self.timers.get('start')
+        if start:
+            return int((time.time()-start)//60)
+        return None
+        
+    @property
+    def mssnM(self):
+        mssM = self.get_property("mssnM")
+        if not mssM:
+            run_time = self.calc_mssM()
+            return run_time if run_time else mssM
+        return mssM
+    
+    @property
+    def expireM(self):
+        return self.get_property("expireM")
+    
+    @property
+    def cap(self):
+        return self.get_property("cap")
+    
+    @property
+    def sku(self):
+        return self.get_property("sku")
+        
+    @property
+    def mission(self):
+        return self.get_property("cycle")
+        
+    @property
+    def phase(self):
+        return self.get_property("phase")
+        
+    @property
+    def cleanMissionStatus_phase(self):
+        return self.phase
+        
+    @property
+    def cleanMissionStatus(self):
+        return self.get_property("cleanMissionStatus")
+        
+    @property
+    def pmaps(self):
+        return self.get_property("pmaps")
+        
+    @property
+    def regions(self):
+        return self.get_property("regions")        
 
     def register_on_message_callback(self, callback):
         self.on_message_callbacks.append(callback)
@@ -195,15 +293,8 @@ class Roomba:
             str(msg.payload),
         )
 
-        self.decode_topics(json_data)
-
-        # default every 5 minutes
-        if time.time() - self.time > self.update_seconds:
-            self.log.debug(
-                "Publishing master_state %s", self.remote_client.address
-            )
-            self.decode_topics(self.master_state)  # publish all values
-            self.time = time.time()
+        #update the state machine and history
+        self.update_state_machine()
 
         # call the callback functions
         for callback in self.on_message_callbacks:
@@ -262,6 +353,137 @@ class Roomba:
             else:
                 dct[k] = merge_dct[k]
 
+    def recursive_lookup(self, search_dict, key, cap=False):
+        '''
+        recursive dictionary lookup
+        if cap is true, return key if it's in the 'cap' dictionary,
+        else return the actual key value
+        '''
+        for k, v in search_dict.items():
+            if cap:
+                if k == 'cap':
+                    return self.recursive_lookup(v, key, False)
+            elif k == key:
+                return v 
+            elif isinstance(v, dict) and k != 'cap':
+                val = self.recursive_lookup(v, key, cap)
+                if val is not None:
+                    return val
+        return None
+
+    def get_property(self, property, cap=False):
+        '''
+        Only works correctly if property is a unique key
+        '''
+        if property in ['cleanSchedule', 'langs']:
+            value = self.recursive_lookup(self.master_state, property+'2', cap)
+            if value is not None:
+                return value
+        return self.recursive_lookup(self.master_state, property, cap)
+
+    def set_flags(self, flags=None):
+        self.handle_flags(flags, True)
+        
+    def clear_flags(self, flags=None):
+        self.handle_flags(flags)
+        
+    def flag_set(self, flag):
+        try:
+            return self.master_state['state']['flags'].get(flag, False)
+        except KeyError:
+            pass
+        return False
+            
+    def handle_flags(self, flags=None, set=False):
+        self.master_state['state'].setdefault('flags', {})
+        if isinstance(flags, str):
+            flags = [flags]
+        if flags:
+            for flag in flags:
+                if set:
+                    if not self.flag_set(flag):
+                        self.flags[flag] = True
+                    self.master_state['state']['flags'].update(self.flags)
+                else:
+                    self.flags.pop(flag, None)
+                    self.master_state['state']['flags'].pop(flag, None)
+        else:
+            self.flags = {}
+            if not set:
+                self.master_state['state']['flags'] = self.flags
+
+    def is_set(self, name):
+        return self.timers.get(name, {}).get('value', False)
+        
+    def when_run(self, name):
+        th = self.timers.get(name, {}).get('reset', None)
+        if th:
+            return max(0, int(th._when - self.loop.time()))
+        return 0
+    
+    def timer(self, name, value=False, duration=10):
+        self.timers.setdefault(name, {})
+        self.timers[name]['value'] = value
+        self.log.info('Set {} to: {}'.format(name, value))
+        if self.timers[name].get('reset'):
+            self.timers[name]['reset'].cancel()    
+        if value:
+            self.timers[name]['reset'] = self.loop.call_later(duration, self.timer, name)  #reset reset timer in duration seconds
+
+    def update_history(self, property, value=None, cap=False):
+        '''
+        keep previous value
+        '''
+        if value is not None:
+            current = value
+        else:
+            current = self.get_property(property, cap)
+        if isinstance(current, dict):
+            current = current.copy()
+        previous = self.history.get(property, {}).get('current')
+        if previous is None:
+            previous = current
+        self.history[property] = {'current' : current,
+                                  'previous': previous}
+        return current
+        
+    def set_history(self, property, value=None):
+        if isinstance(value, dict):
+            value = value.copy()
+        self.history[property] = {'current' : value,
+                                  'previous': value}
+        
+    def current(self, property):
+        return self.history.get(property, {}).get('current')
+        
+    def previous(self, property):
+        return self.history.get(property, {}).get('previous')
+        
+    def changed(self, property):
+        changed = self.history.get(property, {}).get('current') != self.history.get(property, {}).get('previous')
+        return changed
+
+    def zero_coords(self, theta=180):
+        '''
+        returns dictionary with default zero coords
+        '''
+        return {"x": 0, "y": 0, "theta": theta}
+        
+    def zero_pose(self, theta=180):
+        '''
+        returns dictionary with default zero coords
+        '''
+        return {"theta":theta,"point":{"x":0,"y":0}}  
+
+    def get_error_message(self, error_num):
+        try:
+            error_message = ROOMBA_ERROR_MESSAGES[error_num]
+        except KeyError as e:
+            self.log.warning(
+                "Error looking up error message {}".format(e))
+            error_message = "Unknown Error number: {}".format(error_num)
+        return error_message                                         
+
     def decode_payload(self, topic, payload):
         """
         Format json for pretty printing.
@@ -295,66 +517,39 @@ class Roomba:
             formatted_data = payload
         return formatted_data, dict(json_data)
 
-    def decode_topics(self, state, prefix=None):
-        """
-        Decode json data dict and publish as individual topics.
+    def update_state_machine(self):
+        '''
+        Roomba progresses through states (phases), current identified states
+        are:
+        ""              : program started up, no state yet
+        "run"           : running on a Cleaning Mission
+        "hmUsrDock"     : returning to Dock
+        "hmMidMsn"      : need to recharge
+        "hmPostMsn"     : mission completed
+        "charge"        : charging
+        "stuck"         : Roomba is stuck
+        "stop"          : Stopped
+        "pause"         : paused
+        "evac"          : emptying bin
+        "chargingerror" : charging base is unplugged
 
-        Publish to brokerFeedback/topic the keys are concatinated with _
-        to make one unique topic name strings are expressely converted
-        to strings to avoid unicode representations
-        """
-        for key, value in state.items():
-            if isinstance(value, dict):
-                if prefix is None:
-                    self.decode_topics(value, key)
-                else:
-                    self.decode_topics(value, prefix + "_" + key)
-            else:
-                if isinstance(value, list):
-                    newlist = []
-                    for i in value:
-                        if isinstance(i, dict):
-                            for ki, vi in i.items():
-                                newlist.append((str(ki), vi))
-                        else:
-                            if isinstance(i, str):
-                                i = str(i)
-                            newlist.append(i)
-                    value = newlist
-                if prefix is not None:
-                    key = prefix + "_" + key
-                # all data starts with this, so it's redundant
-                key = key.replace("state_reported_", "")
-                # save variables for drawing map
-                if key == "pose_theta":
-                    self.co_ords["theta"] = value
-                if key == "pose_point_x":  # x and y are reversed...
-                    self.co_ords["y"] = value
-                if key == "pose_point_y":
-                    self.co_ords["x"] = value
-                if key == "bin_full":
-                    self.bin_full = value
-                if key == "cleanMissionStatus_error":
-                    try:
-                        self.error_code = value
-                        self.error_message = ROOMBA_ERROR_MESSAGES[value]
-                    except KeyError as e:
-                        self.log.warning(
-                            "Error looking up Roomba error message: %s", e
-                        )
-                        self.error_message = "Unknown Error number: %s" % value
-                if key == "cleanMissionStatus_phase":
-                    self.previous_cleanMissionStatus_phase = (
-                        self.cleanMissionStatus_phase
-                    )
-                    self.cleanMissionStatus_phase = value
-
-        if prefix is None:
-            self.update_state_machine()
-
-    def update_state_machine(self, new_state=None):
-        """
-        Roomba progresses through states (phases).
+        available states:
+        states = {"charge"          : "Charging",
+                  "new"             : "New Mission",
+                  "run"             : "Running",
+                  "resume"          : "Running",
+                  "hmMidMsn"        : "Docking",
+                  "recharge"        : "Recharging",
+                  "stuck"           : "Stuck",
+                  "hmUsrDock"       : "User Docking",
+                  "completed"       : "Mission Completed",
+                  "cancelled"       : "Cancelled",
+                  "stop"            : "Stopped",
+                  "pause"           : "Paused",
+                  "evac"            : "Emptying",
+                  "hmPostMsn"       : "Docking - End Mission",
+                  "chargingerror"   : "Base Unplugged",
+                  ""                :  None}
 
         Normal Sequence is "" -> charge -> run -> hmPostMsn -> charge
         Mid mission recharge is "" -> charge -> run -> hmMidMsn -> charge
@@ -362,115 +557,147 @@ class Roomba:
         Stuck is "" -> charge -> run -> hmPostMsn -> stuck
                     -> run/charge/stop/hmUsrDock -> charge
         Start program during run is "" -> run -> hmPostMsn -> charge
-
+        Note: Braava M6 goes run -> hmPostMsn -> run -> charge when docking
+        Note: S9+ goes run -> hmPostMsn -> charge -> run -> charge on a training mission (ie cleanMissionStatus_cycle = 'train')
+        Note: The first 3 "pose" (x, y) co-ordinate in the first 10 seconds during undocking at mission start seem to be wrong
+              for example, during undocking:
+              {"x": 0, "y": 0},
+              {"x": -49, "y": 0},
+              {"x": -47, "y": 0},
+              {"x": -75, "y": -11}... then suddenly becomes normal co-ordinates
+              {"x": -22, "y": 131}
+              {"x": -91, "y": 211}
+              also during "hmPostMsn","hmMidMsn", "hmUsrDock" the co-ordinates system also seems to change to bogus values
+              For example, in "run" phase, co-ordinates are reported as:
+              {"x": -324, "y": 824},
+              {"x": -324, "y": 826} ... etc, then some time after hmMidMsn (for example) they change to:
+              {"x": 417, "y": -787}, which continues for a while
+              {"x": 498, "y": -679}, and then suddenly changes back to normal co-ordinates
+              {"x": -348, "y": 787},
+              {"x": -161, "y": 181},
+              {"x": 0, "y": 0}
+              
         Need to identify a new mission to initialize map, and end of mission to
         finalise map.
-        Assume  charge -> run = start of mission (init map)
-                stuck - > charge = init map
-        Assume hmPostMsn -> charge = end of mission (finalize map)
+        mission goes from 'none' to 'clean' (or another mission name) at start of mission (init map)
+        mission goes from 'clean' (or other mission) to 'none' at end of missions (finalize map)
         Anything else = continue with existing map
-        """
+        '''
 
+        mission = self.update_history("cycle")      #mission
+        phase = self.update_history("phase")        #mission phase
+        self.update_history("pose")                 #update co-ordinates
+        self.update_flags()
+
+        if phase is None or mission is None:
+            return
+        
         current_mission = self.current_state
+        
+        self.log.info('current_state: {}, \
+            current phase: {}, \
+            mission: {}, \
+            mission_min: {}, \
+            recharge_min: {}, \
+            co-ords changed: {}'.format(self.current_state,
+                                            phase,
+                                            mission,
+                                            self.mssnM,
+                                            self.rechrgM,
+                                            self.changed('pose')))
 
-        try:
-            if (
-                self.master_state["state"]["reported"]["cleanMissionStatus"][
-                    "mssnM"
-                ]
-                == "none"
-                and self.cleanMissionStatus_phase == "charge"
-                and (
-                    self.current_state == ROOMBA_STATES["pause"]
-                    or self.current_state == ROOMBA_STATES["recharge"]
-                )
-            ):
-                self.current_state = ROOMBA_STATES["cancelled"]
-        except KeyError:
-            pass
-
-        if (
-            self.current_state == ROOMBA_STATES["charge"]
-            and self.cleanMissionStatus_phase == "run"
-        ):
-            self.current_state = ROOMBA_STATES["new"]
-        elif (
-            self.current_state == ROOMBA_STATES["run"]
-            and self.cleanMissionStatus_phase == "hmMidMsn"
-        ):
-            self.current_state = ROOMBA_STATES["dock"]
-        elif (
-            self.current_state == ROOMBA_STATES["dock"]
-            and self.cleanMissionStatus_phase == "charge"
-        ):
-            self.current_state = ROOMBA_STATES["recharge"]
-        elif (
-            self.current_state == ROOMBA_STATES["recharge"]
-            and self.cleanMissionStatus_phase == "charge"
-            and self.bin_full
-        ):
-            self.current_state = ROOMBA_STATES["pause"]
-        elif (
-            self.current_state == ROOMBA_STATES["run"]
-            and self.cleanMissionStatus_phase == "charge"
-        ):
-            self.current_state = ROOMBA_STATES["recharge"]
-        elif (
-            self.current_state == ROOMBA_STATES["recharge"]
-            and self.cleanMissionStatus_phase == "run"
-        ):
-            self.current_state = ROOMBA_STATES["pause"]
-        elif (
-            self.current_state == ROOMBA_STATES["pause"]
-            and self.cleanMissionStatus_phase == "charge"
-        ):
-            self.current_state = ROOMBA_STATES["pause"]
-            # so that we will draw map and can update recharge time
+        if phase == "charge":
+            #self.set_history('pose', self.zero_pose())
             current_mission = None
-        elif (
-            self.current_state == ROOMBA_STATES["charge"]
-            and self.cleanMissionStatus_phase == "charge"
-        ):
-            # so that we will draw map and can update charge status
-            current_mission = None
-        elif (
-            self.current_state == ROOMBA_STATES["stop"]
-            or self.current_state == ROOMBA_STATES["pause"]
-        ) and self.cleanMissionStatus_phase == "hmUsrDock":
-            self.current_state = ROOMBA_STATES["cancelled"]
-        elif (
-            self.current_state == ROOMBA_STATES["hmUsrDock"]
-            or self.current_state == ROOMBA_STATES["cancelled"]
-        ) and self.cleanMissionStatus_phase == "charge":
-            self.current_state = ROOMBA_STATES["dockend"]
-        elif (
-            self.current_state == ROOMBA_STATES["hmPostMsn"]
-            and self.cleanMissionStatus_phase == "charge"
-        ):
-            self.current_state = ROOMBA_STATES["dockend"]
-        elif (
-            self.current_state == ROOMBA_STATES["dockend"]
-            and self.cleanMissionStatus_phase == "charge"
-        ):
-            self.current_state = ROOMBA_STATES["charge"]
+            
+        if self.current_state == ROOMBA_STATES["new"] and phase != 'run':
+            self.log.info('waiting for run state for New Missions')
+            if time.time() - self.timers['start'] >= 20:
+                self.log.warning('Timeout waiting for run state')
+                self.current_state = ROOMBA_STATES[phase]
 
+        elif phase == "run" and (self.is_set('ignore_run') or mission == 'none'):
+            self.log.info('Ignoring bogus run state')
+            
+        elif phase == "charge" and mission == 'none' and self.is_set('ignore_run'):
+            self.log.info('Ignoring bogus charge/mission state')
+            self.update_history("cycle", self.previous('cycle'))
+            
+        elif phase in ["hmPostMsn","hmMidMsn", "hmUsrDock"]:
+            self.timer('ignore_run', True, 10)
+            self.current_state = ROOMBA_STATES[phase]
+            
+        elif self.changed('cycle'): #if mission has changed
+            if mission != 'none':
+                self.current_state = ROOMBA_STATES["new"]
+                self.timers['start'] = time.time()
+                if isinstance(self.sku, str) and self.sku[0].lower() in ['i', 's', 'm']:
+                    #self.timer('ignore_coordinates', True, 30)  #ignore updates for 30 seconds at start of new mission
+                    pass
+            else:
+                self.timers.pop('start', None)
+                if self.bin_full:
+                    self.current_state = ROOMBA_STATES["cancelled"]
+                else:
+                    self.current_state = ROOMBA_STATES["completed"]
+                self.timer('ignore_run', True, 5)  #still get bogus 'run' states after mission complete.
+            
+        elif phase == "charge" and self.rechrgM:
+            if self.bin_full:
+                self.current_state = ROOMBA_STATES["pause"]
+            else:
+                self.current_state = ROOMBA_STATES["recharge"]
+            
         else:
-            if self.cleanMissionStatus_phase not in ROOMBA_STATES:
+            try:
+                self.current_state = ROOMBA_STATES[phase]
+            except KeyError:
                 self.log.error(
                     "Can't find state %s in predefined Roomba states, "
                     "please create a new issue: "
                     "https://github.com/pschmitt/roombapy/issues/new",
-                    self.cleanMissionStatus_phase,
+                    phase,
                 )
                 self.current_state = None
-            else:
-                self.current_state = ROOMBA_STATES[
-                    self.cleanMissionStatus_phase
-                ]
-
-        if new_state is not None:
-            self.current_state = ROOMBA_STATES[new_state]
-            self.log.debug("Current state: %s", self.current_state)
 
         if self.current_state != current_mission:
-            self.log.debug("State updated to: %s", self.current_state)
+            self.log.info("updated state to: {}".format(self.current_state))
+
+        #draw the map, forcing a redraw if needed
+        self.mapper.draw_map(current_mission != self.current_state)
+
+    def update_flags(self):
+        if not self.bin_full:
+            self.clear_flags('bin_full')
+            
+        if self.tanklvl is not None:
+            if self.tanklvl < 100:
+                self.set_flags('tank_low')
+            else:
+                self.clear_flags('tank_low')
+
+        if  self.current_state == ROOMBA_STATES["charge"]:
+            self.clear_flags(['battery_low', 'stuck'])
+
+        elif self.current_state == ROOMBA_STATES["recharge"]:
+            self.clear_flags(['battery_low', 'stuck'])
+
+        elif self.current_state == ROOMBA_STATES["run"]:
+            self.clear_flags(['stuck', 'new_mission'])
+
+        elif self.current_state == ROOMBA_STATES["new"]:
+            self.clear_flags()
+            self.set_flags('new_mission')
+
+        elif self.current_state == ROOMBA_STATES["stuck"]:
+            self.set_flags('stuck')
+
+        elif self.current_state == ROOMBA_STATES["cancelled"]:
+            self.set_flags('cancelled')
+
+        elif self.current_state == ROOMBA_STATES["hmMidMsn"]:
+            if not self.is_set('ignore_run'):
+                if self.bin_full:
+                    self.set_flags('bin_full')
+                else:
+                    self.set_flags('battery_low')
