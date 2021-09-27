@@ -109,3 +109,7 @@ ROOMBA_STATES = {
     "chargingerror": "Base Unplugged",
     "": None,
 }
+
+
+DEFAULT_MAP_SKIP_POINTS = 3
+DEFAULT_MAP_MAX_ALLOWED_DISTANCE = 500

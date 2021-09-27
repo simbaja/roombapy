@@ -93,9 +93,9 @@ class Roomba:
     def co_ords(self):
         co_ords = self.pose
         if isinstance(co_ords, dict):
-            return {'x': -co_ords['point']['y'] if self.invert_x else co_ords['point']['y'],
-                    'y': -co_ords['point']['x'] if self.invert_y else co_ords['point']['x'],
-                    'theta':co_ords['theta']}
+            return {'x': co_ords['point']['y'],
+                    'y': co_ords['point']['x'],
+                    'theta': co_ords['theta']}
         return self.zero_coords()
         
     @property
