@@ -271,17 +271,17 @@ class RoombaMapper:
         self.font = font
         if self.font is None:
             try:
-                self.fnt = ImageFont.truetype('FreeMono.ttf', 40)
+                self.font = ImageFont.truetype('FreeMono.ttf', 40)
             except IOError as e:
                 self.log.warning("error loading font: %s, loading default font".format(e))
-                self.fnt = ImageFont.load_default()
+                self.font = ImageFont.load_default()
 
         #generate the default icons
         self.icons = icons(base_icon=None, angle=self.angle, fnt=self.font, size=(32,32), log=self.log)
 
         #mapping variables
         self.map: RoombaMap = None
-        self.rendered_map: Image = None
+        self.rendered_map: Image.Image = None
         self.points_to_skip = DEFAULT_MAP_SKIP_POINTS
         self.points_skipped = 0
         self.max_distance = DEFAULT_MAP_MAX_ALLOWED_DISTANCE
@@ -298,6 +298,10 @@ class RoombaMapper:
     @property
     def origin_image_pos(self) -> RoombaPosition:
         return self._map_coord_to_image_coord(self.roomba.zero_coords())
+
+    @property
+    def state(self) -> Image.Image:
+        return self.rendered_map
 
     def reset_map(self, map: RoombaMap, points_to_skip: int = DEFAULT_MAP_SKIP_POINTS):
         self.history = []
@@ -355,8 +359,7 @@ class RoombaMapper:
                 self.points_skipped += 1
                 return
 
-            #at times, roomba reports erroneous points, ignore if too large of a gap
-            #between measurements
+            #if we have history, we need to check a couple things
             if len(self.history) > 0:
                 old = self.history[-1]
                 old_x = old["x"]
@@ -364,6 +367,12 @@ class RoombaMapper:
                 new_x = position["x"]
                 new_y = position["y"]
 
+                #if we didn't actually move from the last recorded position, ignore it
+                if (old_x,old_y) == (new_x,new_y):
+                    return
+
+                #at times, roomba reports erroneous points, ignore if too large of a gap
+                #between measurements
                 if self._map_distance((old_x,old_y),(new_x,new_y)) > self.max_distance:
                     return
 

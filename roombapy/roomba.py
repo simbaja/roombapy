@@ -631,6 +631,7 @@ class Roomba:
             if mission != 'none':
                 self.current_state = ROOMBA_STATES["new"]
                 self.timers['start'] = time.time()
+                self.mapper.reset_map()
                 if isinstance(self.sku, str) and self.sku[0].lower() in ['i', 's', 'm']:
                     #self.timer('ignore_coordinates', True, 30)  #ignore updates for 30 seconds at start of new mission
                     pass
@@ -664,7 +665,7 @@ class Roomba:
             self.log.info("updated state to: {}".format(self.current_state))
 
         #draw the map, forcing a redraw if needed
-        self.mapper.draw_map(current_mission != self.current_state)
+        self.mapper.update_map(current_mission != self.current_state)
 
     def update_flags(self):
         if not self.bin_full:
