@@ -1,4 +1,4 @@
-
+import io
 import math
 import logging
 import time
@@ -9,7 +9,14 @@ if TYPE_CHECKING:
     from .roomba import Roomba
 
 from roombapy.const import (
-    DEFAULT_MAP_MAX_ALLOWED_DISTANCE, 
+    DEFAULT_BG_COLOR,
+    DEFAULT_IMG_HEIGHT,
+    DEFAULT_IMG_WIDTH,
+    DEFAULT_MAP_MAX_ALLOWED_DISTANCE,
+    DEFAULT_PATH_COLOR,
+    DEFAULT_PATH_WIDTH,
+    DEFAULT_TEXT_BG_COLOR,
+    DEFAULT_TEXT_COLOR, 
     ROOMBA_STATES, 
     DEFAULT_MAP_SKIP_POINTS
 )
@@ -19,7 +26,7 @@ global HAVE_PIL
 HAVE_PIL = False
 
 try:
-    from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps, ImageColor
+    from PIL import Image, ImageDraw, ImageFont, ImageColor
     HAVE_PIL = True
 except ImportError:
     print("PIL module not found, maps are disabled")
@@ -79,7 +86,7 @@ def center_image(ox: int, oy: int, image: Image.Image, bounds: Tuple[int,int]) -
         xx = clamp(xx, 0, bounds[0])
         yy = clamp(yy, 0, bounds[1])
             
-def make_transparent(image, color=None):
+def make_transparent(image: Image.Image, color: Tuple = None):
     '''
     take image and make white areas transparent
     return transparent image
@@ -98,7 +105,14 @@ def make_transparent(image, color=None):
                 newData.append(item)
 
     image.putdata(newData)
-    return image
+    return image  
+
+
+def validate_color(color, default) -> Tuple[int,int,int,int]:      
+    try:
+        return ImageColor.getcolor(color,"RGBA")
+    except:
+        return default
     
 class icons():
     '''
@@ -242,8 +256,8 @@ class RoombaMap:
     coords_start: Tuple[int,int]
     coords_end: Tuple[int,int]
     angle: float
-    floorplan: Image = None
-    walls: Image = None
+    floorplan: Image.Image = None
+    walls: Image.Image = None
 
     @property
     def img_width(self) -> int:
@@ -251,7 +265,7 @@ class RoombaMap:
             x, _ = self.floorplan.size
             return x
         else:
-            return 1000
+            return DEFAULT_IMG_WIDTH
     
     @property
     def img_height(self) -> int:
@@ -259,13 +273,26 @@ class RoombaMap:
             _, y = self.floorplan.size
             return y
         else:
-            return 1000
+            return DEFAULT_IMG_HEIGHT
 
 class RoombaMapper:
-    def __init__(self, roomba: 'Roomba', font: ImageFont.ImageFont = None) -> None:
+    def __init__(self, 
+        roomba: 'Roomba', 
+        font: ImageFont.ImageFont = None,
+        bg_color = DEFAULT_BG_COLOR,
+        path_color = DEFAULT_PATH_COLOR,
+        path_width = DEFAULT_PATH_WIDTH,
+        text_color = DEFAULT_TEXT_COLOR,
+        text_bg_color = DEFAULT_TEXT_BG_COLOR
+    ):
         self.log = logging.getLogger(__name__)
         self.roomba = roomba
         self.map_enabled = roomba.cap.get("pose", False) and HAVE_PIL
+        self.bg_color = bg_color
+        self.path_color = path_color
+        self.text_color = text_color
+        self.text_bg_color = text_bg_color
+        self.path_width = path_width
 
         #initialize the font
         self.font = font
@@ -277,21 +304,21 @@ class RoombaMapper:
                 self.font = ImageFont.load_default()
 
         #generate the default icons
-        self.icons = icons(base_icon=None, angle=self.angle, fnt=self.font, size=(32,32), log=self.log)
+        self.icons = icons(base_icon=None, angle=0, fnt=self.font, size=(32,32), log=self.log)
 
         #mapping variables
-        self.map: RoombaMap = None
-        self.rendered_map: Image.Image = None
-        self.points_to_skip = DEFAULT_MAP_SKIP_POINTS
-        self.points_skipped = 0
-        self.max_distance = DEFAULT_MAP_MAX_ALLOWED_DISTANCE
-        self.history = []
-        self.history_translated: list[RoombaPosition] = []
+        self._map: RoombaMap = None
+        self._rendered_map: bytes = None
+        self._points_to_skip = DEFAULT_MAP_SKIP_POINTS
+        self._points_skipped = 0
+        self._max_distance = DEFAULT_MAP_MAX_ALLOWED_DISTANCE
+        self._history = []
+        self._history_translated: list[RoombaPosition] = []
 
     @property
     def roomba_image_pos(self) -> RoombaPosition:       
         try:
-            return self.history_translated[-1]
+            return self._history_translated[-1]
         except:
             return RoombaPosition(0,0,0)
     
@@ -300,15 +327,47 @@ class RoombaMapper:
         return self._map_coord_to_image_coord(self.roomba.zero_coords())
 
     @property
-    def state(self) -> Image.Image:
-        return self.rendered_map
+    def rendered_map(self) -> bytes:
+        return self._rendered_map
+
+    @property
+    def bg_color(self) -> Tuple[int,int,int,int]:
+        return self._bg_color
+    
+    @property.setter
+    def bg_color(self, value):
+        self._bg_color = validate_color(value, DEFAULT_BG_COLOR)
+    
+    @property
+    def path_color(self) -> Tuple[int,int,int,int]:
+        return self._path_color
+    
+    @property.setter
+    def path_color(self, value):
+        self._path_color = validate_color(value, DEFAULT_PATH_COLOR)
+
+    @property
+    def text_color(self) -> Tuple[int,int,int,int]:
+        return self._text_color
+    
+    @property.setter
+    def text_color(self, value):
+        self._text_color = validate_color(value, DEFAULT_TEXT_COLOR)
+
+    @property
+    def text_bg_color(self) -> Tuple[int,int,int,int]:
+        return self._text_bg_color
+    
+    @property.setter
+    def text_bg_color(self, value):
+        self._text_bg_color = validate_color(value, DEFAULT_TEXT_BG_COLOR)
 
     def reset_map(self, map: RoombaMap, points_to_skip: int = DEFAULT_MAP_SKIP_POINTS):
-        self.history = []
-        self.history_translated = []
-        self.map = map
-        self.points_to_skip = points_to_skip
-        self.points_skipped = 0
+        self._history = []
+        self._history_translated = []
+        self._map = map
+        self._points_to_skip = points_to_skip
+        self._points_skipped = 0
 
     def update_map(self, force_redraw = False):
         """Updates the cleaning map"""
@@ -355,13 +414,13 @@ class RoombaMapper:
         #if we have a position update, append to the history if it meets our criteria
         if position:
             #there's a few points at the beginning that are usually erroneous, skip them
-            if self.points_skipped < self.points_to_skip:
-                self.points_skipped += 1
+            if self._points_skipped < self._points_to_skip:
+                self._points_skipped += 1
                 return
 
             #if we have history, we need to check a couple things
-            if len(self.history) > 0:
-                old = self.history[-1]
+            if len(self._history) > 0:
+                old = self._history[-1]
                 old_x = old["x"]
                 old_y = old["y"]
                 new_x = position["x"]
@@ -373,11 +432,11 @@ class RoombaMapper:
 
                 #at times, roomba reports erroneous points, ignore if too large of a gap
                 #between measurements
-                if self._map_distance((old_x,old_y),(new_x,new_y)) > self.max_distance:
+                if self._map_distance((old_x,old_y),(new_x,new_y)) > self._max_distance:
                     return
 
-            self.history.append(position)
-            self.history_translated.append(self._map_coord_to_image_coord(position))
+            self._history.append(position)
+            self._history_translated.append(self._map_coord_to_image_coord(position))
 
     def _map_coord_to_image_coord(self, coord: dict) -> RoombaPosition:
         x: float = float(coord["x"])
@@ -386,29 +445,29 @@ class RoombaMapper:
         
         #perform rotation: occurs about the map origin, so should
         #undo any rotation that exists
-        x, y = rotate(x, y, self.map.angle,
-            invert_x = self.map.coords_start[0] > self.map.coords_end[0],
-            invert_y = self.map.coords_start[1] < self.map.coords_end[1]
+        x, y = rotate(x, y, self._map.angle,
+            invert_x = self._map.coords_start[0] > self._map.coords_end[0],
+            invert_y = self._map.coords_start[1] < self._map.coords_end[1]
         )
 
         #interpolate the x,y coordinates to scale to the appropriate output
         img_x = interpolate(
             x, 
-            [self.map.coords_start[0], self.map.coords_end[0]],
-            [0, self.map.img_width - 1]
+            [self._map.coords_start[0], self._map.coords_end[0]],
+            [0, self._map.img_width - 1]
         )
         img_y = interpolate(
             y, 
-            [self.map.coords_start[1], self.map.coords_end[1]],
-            [0, self.map.img_height - 1]
+            [self._map.coords_start[1], self._map.coords_end[1]],
+            [0, self._map.img_height - 1]
         )
 
         #make sure we stay within the bounds
-        clamp(img_x, 0, self.map.img_width)
-        clamp(img_y, 0, self.map.img_height)
+        clamp(img_x, 0, self._map.img_width)
+        clamp(img_y, 0, self._map.img_height)
         
         #adjust theta
-        img_theta = theta + self.map.angle
+        img_theta = theta + self._map.angle
         
         #return the tuple
         return RoombaPosition(int(img_x), int(img_y), int(img_theta))
@@ -417,18 +476,18 @@ class RoombaMapper:
         """Renders the map"""
 
         #generate the base on which other layers will be composed
-        base = self._map_blank_image()
+        base = self._map_blank_image(color=self.bg_color)
 
         #add the floorplan if available
-        if self.map.floorplan:
-            base = Image.alpha_composite(base, self.map.floorplan)
+        if self._map.floorplan:
+            base = Image.alpha_composite(base, self._map.floorplan)
 
         #draw in the vacuum path
         base = self._draw_vacuum_path(base)
 
         #draw in the map walls (to hide overspray)
-        if self.map.walls:
-            base = Image.alpha_composite(base, self.map.walls)
+        if self._map.walls:
+            base = Image.alpha_composite(base, self._map.walls)
 
         #draw the roomba and any problems
         base = self._draw_roomba(base)
@@ -436,23 +495,25 @@ class RoombaMapper:
         #finally, draw the text
         base = self._draw_text(base)
 
-        #set the internal image
-        self.rendered_map = base
+        #save the internal image
+        with io.BytesIO() as stream:
+            base.save(stream, format="PNG")
+            self._rendered_map = stream.getvalue()
 
         #call event handlers
         
     def _map_blank_image(self, color=transparent) -> Image.Image:
-        return make_blank_image(self.map.img_width,self.map.img_height,color)
+        return make_blank_image(self._map.img_width,self._map.img_height,color)
 
     def _draw_vacuum_path(self, base: Image.Image) -> Image.Image:
-        if len(self.history_translated) > 1:        
+        if len(self._history_translated) > 1:        
             layer = self._map_blank_image()
             renderer = ImageDraw.Draw(layer)
 
             renderer.line(
-                map(lambda p: (p.x,p.y), self.history_translated),
-                fill=(255,0,0,180),
-                width=2,
+                map(lambda p: (p.x,p.y), self._history_translated),
+                fill=self.path_color,
+                width=self.path_width,
                 joint="curve"
             )
 
@@ -488,15 +549,15 @@ class RoombaMapper:
 
         #add the problem icon (pick one in a priority order)
         problem_icon = None
-        if self.flags.get('stuck'):
+        if self.roomba.flags.get('stuck'):
             problem_icon = self.icons['stuck']
-        elif self.flags.get('cancelled'):
+        elif self.roomba.flags.get('cancelled'):
             problem_icon = self.icons['cancelled']
-        elif self.flags.get('bin_full'):
+        elif self.roomba.flags.get('bin_full'):
             problem_icon = self.icons['bin full']
-        elif self.flags.get('battery_low'):
+        elif self.roomba.flags.get('battery_low'):
             problem_icon = self.icons['battery']
-        elif self.flags.get('tank_low'):
+        elif self.roomba.flags.get('tank_low'):
             problem_icon = self.icons['tank low']
 
         if problem_icon:
@@ -531,10 +592,10 @@ class RoombaMapper:
         bbox = (bbox[0]-margin,bbox[1]-margin,bbox[2]+margin,bbox[3]+margin)
 
         #render a background box
-        renderer.rectangle(bbox, fill=(0, 0, 0, 180))
+        renderer.rectangle(bbox, fill=self.text_bg_color)
 
         #render the text
-        renderer.multiline_text((margin,margin), combined_text, fill=(255,255,255,255))
+        renderer.multiline_text((margin,margin), combined_text, fill=self.text_color)
 
         return Image.alpha_composite(base, layer)
 
@@ -596,5 +657,9 @@ class RoombaMapper:
         return display_state, display_attributes, display_time    
 
     def _map_distance(self, pos1: Tuple(int,int), pos2: Tuple(int,int)):
-        return int(math.sqrt(((pos2[0]-pos1[0])**2)+((pos2[1]-pos1[1])**2)))        
+        return int(math.sqrt(((pos2[0]-pos1[0])**2)+((pos2[1]-pos1[1])**2)))  
 
+    def _interpolate_path_color(f_co, t_co, interval):
+        det_co =[(t - f) / interval for f , t in zip(f_co, t_co)]
+        for i in range(interval):
+            yield [round(f + det * i) for f, det in zip(f_co, det_co)]  
