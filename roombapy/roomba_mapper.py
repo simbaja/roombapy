@@ -1,6 +1,7 @@
 import io
 import math
 import logging
+import os
 import time
 from typing import TYPE_CHECKING, NamedTuple, Tuple
 import textwrap
@@ -258,6 +259,36 @@ class RoombaMap:
     angle: float
     floorplan: Image.Image = None
     walls: Image.Image = None
+    icon_set: str = None
+
+    def __init__(
+        self, 
+        coords_start: Tuple[int,int] = (0,0),
+        coords_end: Tuple[int,int] = (0,0),
+        angle: float = 0,
+        floorplan: str = None,
+        walls: str = None,
+        icon_set: str = None):
+
+        self.log = logging.getLogger(__name__)
+        self.coords_start = coords_start
+        self.coords_end = coords_end
+        self.angle = angle
+        self.icon_set = icon_set
+        
+        if floorplan:
+            try:
+                self.floorplan = Image.open(floorplan).convert('RGBA')
+            except:
+                self.log.warning(f'Could not load floorplan from {floorplan}')
+        if walls:
+            try:
+                self.walls = Image.open(walls).convert('RGBA')
+            except:
+                self.log.warning(f'Could not load walls from {floorplan}')
+
+        if not self.floorplan:
+            self.floorplan = make_blank_image(DEFAULT_IMG_WIDTH, DEFAULT_IMG_HEIGHT)
 
     @property
     def img_width(self) -> int:
@@ -283,7 +314,8 @@ class RoombaMapper:
         path_color = DEFAULT_PATH_COLOR,
         path_width = DEFAULT_PATH_WIDTH,
         text_color = DEFAULT_TEXT_COLOR,
-        text_bg_color = DEFAULT_TEXT_BG_COLOR
+        text_bg_color = DEFAULT_TEXT_BG_COLOR,
+        assets_path = "./assets"
     ):
         self.log = logging.getLogger(__name__)
         self.roomba = roomba
@@ -293,18 +325,20 @@ class RoombaMapper:
         self.text_color = text_color
         self.text_bg_color = text_bg_color
         self.path_width = path_width
+        self.assets_path = assets_path
 
         #initialize the font
         self.font = font
         if self.font is None:
             try:
-                self.font = ImageFont.truetype('FreeMono.ttf', 40)
+                self.font = ImageFont.truetype(os.path.join(assets_path, "FreeMono.ttf"), 40)
             except IOError as e:
                 self.log.warning("error loading font: %s, loading default font".format(e))
                 self.font = ImageFont.load_default()
 
         #generate the default icons
-        self.icons = icons(base_icon=None, angle=0, fnt=self.font, size=(32,32), log=self.log)
+        self.icons: dict[str,icons] = {}
+        self.icons["default"] = icons(base_icon=None, angle=0, fnt=self.font, size=(32,32), log=self.log)
 
         #mapping variables
         self._map: RoombaMap = None
@@ -361,6 +395,41 @@ class RoombaMapper:
     @property.setter
     def text_bg_color(self, value):
         self._text_bg_color = validate_color(value, DEFAULT_TEXT_BG_COLOR)
+
+    def add_icon_set(self,
+        name: str,
+        icon_path: str = "./assets",                    
+        home_icon_file: str = "home.png",
+        roomba_icon_file: str = "roomba.png",
+        roomba_error_file: str = "roombaerror.png",
+        roomba_cancelled_file: str = "roombacancelled.png",
+        roomba_battery_file: str = "roomba-charge.png",
+        bin_full_file: str = "binfull.png",
+        tank_low_file: str = "tanklow.png",
+        roomba_size=(50,50)        
+    ):
+        if not name:
+            self.log.error("Icon sets must have names")
+            return
+
+        i = icons(base_icon=None, angle=0, fnt=self.font, size=(32,32), log=self.log)
+
+        if roomba_icon_file:
+            i.load_icon_file('roomba', os.path.join(icon_path, roomba_icon_file), roomba_size)
+        if roomba_error_file:
+            i.load_icon_file('stuck', os.path.join(icon_path, roomba_error_file), roomba_size)
+        if roomba_cancelled_file:
+            i.load_icon_file('cancelled', os.path.join(icon_path, roomba_cancelled_file), roomba_size)
+        if roomba_battery_file:
+            i.load_icon_file('battery', os.path.join(icon_path, roomba_battery_file), roomba_size)
+        if bin_full_file:
+            i.load_icon_file('bin full', os.path.join(icon_path, bin_full_file), roomba_size)
+        if tank_low_file:
+            i.load_icon_file('tank low', os.path.join(icon_path, tank_low_file), roomba_size)
+        if home_icon_file:
+            i.load_icon_file('home', os.path.join(icon_path, home_icon_file), (32,32))
+
+        self.icons[name] = i
 
     def reset_map(self, map: RoombaMap, points_to_skip: int = DEFAULT_MAP_SKIP_POINTS):
         self._history = []
@@ -526,22 +595,28 @@ class RoombaMapper:
 
         #get the image coordinates of the roomba
         x, y, theta = self.roomba_image_pos
-        icon = self.icons['roomba']
+
+        #get the icon set to use
+        icon_set_name = "default"
+        if self._map.icon_set:
+            icon_set_name = self._map.icon_set
+
+        icon_set = self.icons[icon_set_name]
 
         #add in the roomba icon
         layer.paste(
-            self.icons['roomba'].rotate(theta, expand=False),
+            icon_set.icons['roomba'].rotate(theta, expand=False),
             center_image(x, y, self.icons['roomba'], layer.size)            
         )
 
         #add the dock
         dock = self._map_blank_image()
         dock.paste(
-            self.icons['home'],
+            icon_set.icons['home'],
             center_image(
                 self.origin_image_pos.x, 
                 self.origin_image_pos.y, 
-                self.icons['home'], layer.size
+                icon_set.icons['home'], layer.size
             )
         )
 
@@ -550,15 +625,15 @@ class RoombaMapper:
         #add the problem icon (pick one in a priority order)
         problem_icon = None
         if self.roomba.flags.get('stuck'):
-            problem_icon = self.icons['stuck']
+            problem_icon = icon_set.icons['stuck']
         elif self.roomba.flags.get('cancelled'):
-            problem_icon = self.icons['cancelled']
+            problem_icon = icon_set.icons['cancelled']
         elif self.roomba.flags.get('bin_full'):
-            problem_icon = self.icons['bin full']
+            problem_icon = icon_set.icons['bin full']
         elif self.roomba.flags.get('battery_low'):
-            problem_icon = self.icons['battery']
+            problem_icon = icon_set.icons['battery']
         elif self.roomba.flags.get('tank_low'):
-            problem_icon = self.icons['tank low']
+            problem_icon = icon_set.icons['tank low']
 
         if problem_icon:
             problem = self._map_blank_image()
