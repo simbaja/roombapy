@@ -24,7 +24,7 @@ from collections import OrderedDict
 from collections.abc import Mapping
 from datetime import datetime
 
-from roombapy.const import ROOMBA_ERROR_MESSAGES, ROOMBA_STATES
+from roombapy.const import ROOMBA_ERROR_MESSAGES, ROOMBA_READY_MESSAGES, ROOMBA_STATES
 from roombapy.roomba_mapper import RoombaMapper
 
 MAX_CONNECTION_RETRIES = 3
@@ -84,7 +84,10 @@ class Roomba:
         self.on_disconnect_callbacks = []
         self.client_error = None
 
+        #create the mapper
         self.mapper = RoombaMapper(self)
+        #replace the crude icons with ones loaded from our assets and make default
+        self.mapper.add_icon_set("default")
         self.history = {}
         self.timers = {}
         self.flags = {}   
@@ -109,6 +112,18 @@ class Roomba:
     @property
     def error_message(self):
         return self.get_error_message(self.error_num)
+
+    @property
+    def not_ready_num(self):
+        try:
+            return self.cleanMissionStatus.get('notReady')
+        except:
+            pass
+        return 0
+    
+    @property
+    def not_ready_message(self):
+        return self.get_not_ready_message(self.not_ready_num)    
         
     @property
     def cleanMissionStatus(self):
@@ -482,7 +497,16 @@ class Roomba:
             self.log.warning(
                 "Error looking up error message {}".format(e))
             error_message = "Unknown Error number: {}".format(error_num)
-        return error_message                                         
+        return error_message   
+
+    def get_not_ready_message(self, not_ready_num):
+        try:
+            message = ROOMBA_READY_MESSAGES[not_ready_num]
+        except KeyError as e:
+            self.log.warning(
+                "Error looking up not ready message {}".format(e))
+            message = "Unknown not ready number: {}".format(not_ready_num)
+        return message                                                 
 
     def decode_payload(self, topic, payload):
         """

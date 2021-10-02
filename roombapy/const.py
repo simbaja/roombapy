@@ -90,6 +90,14 @@ ROOMBA_ERROR_MESSAGES = {
     123: "Battery not initialized",
 }
 
+ROOMBA_READY_MESSAGES = {
+    0: 'N/A',
+    2: 'Uneven Ground',
+    15: 'Low Battery',
+    39: 'Pending',
+    48: 'Path Blocked'   
+}
+
 ROOMBA_STATES = {
     "charge": "Charging",
     "new": "New Mission",
