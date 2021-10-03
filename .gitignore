@@ -13,3 +13,5 @@ Roomba.log
 .DS_Store
 venv
 .venv
+.vscode
+secrets.py

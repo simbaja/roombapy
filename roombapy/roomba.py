@@ -15,6 +15,7 @@ enabling/disabling of room outline drawing, added auto creation of css/html
 files Nick Waterton 11th July  2017  V1.2.1: Quick (untested) fix for room
 outlines if you don't have OpenCV
 """
+import asyncio
 import datetime
 import json
 import logging
@@ -25,16 +26,14 @@ from collections.abc import Mapping
 from datetime import datetime
 
 from roombapy.const import ROOMBA_ERROR_MESSAGES, ROOMBA_READY_MESSAGES, ROOMBA_STATES
-from roombapy.roomba_mapper import RoombaMapper
+from roombapy.roomba_mapper import RoombaMap, RoombaMapper
 
 MAX_CONNECTION_RETRIES = 3
 
 
 class RoombaConnectionError(Exception):
     """Roomba connection exception."""
-
     pass
-
 
 class Roomba:
     """
@@ -55,6 +54,7 @@ class Roomba:
     def __init__(self, remote_client, continuous=True, delay=1):
         """Roomba client initialization."""
         self.log = logging.getLogger(__name__)
+        self.loop = asyncio.get_event_loop()        
 
         self.remote_client = remote_client
         self._init_remote_client_callbacks()
@@ -73,7 +73,6 @@ class Roomba:
         self.roomba_connected = False
         self.indent = 0
         self.master_indent = 0
-        self.invert_x = self.invert_y = None    #mirror x,y
         self.current_state = None
         self.master_state = {}  # all info from roomba stored here
         self.time = time.time()
@@ -90,7 +89,10 @@ class Roomba:
         self.mapper.add_icon_set("default")
         self.history = {}
         self.timers = {}
-        self.flags = {}   
+        self.flags = {}
+
+        self._pmap_id: str = None
+        self._maps: dict[str,RoombaMap] = {}
 
     @property    
     def co_ords(self):
@@ -100,6 +102,10 @@ class Roomba:
                     'y': co_ords['point']['x'],
                     'theta': co_ords['theta']}
         return self.zero_coords()
+
+    @property
+    def current_pmap_id(self):
+        return self._pmap_id
         
     @property
     def error_num(self):
@@ -152,7 +158,7 @@ class Roomba:
     def calc_mssM(self):
         start_time = self.get_property("mssnStrtTm")
         if start_time:
-            return int((datetime.datetime.now() - datetime.datetime.fromtimestamp(start_time)).total_seconds()//60)
+            return int((datetime.now() - datetime.fromtimestamp(start_time)).total_seconds()//60)
         start = self.timers.get('start')
         if start:
             return int((time.time()-start)//60)
@@ -298,7 +304,7 @@ class Roomba:
         if self.indent == 0:
             self.master_indent = max(self.master_indent, len(msg.topic))
 
-        log_string, json_data = self.decode_payload(msg.topic, msg.payload)
+        log_string, json_data = self._decode_payload(msg.topic, msg.payload)
         self.dict_merge(self.master_state, json_data)
 
         self.log.debug(
@@ -309,7 +315,7 @@ class Roomba:
         )
 
         #update the state machine and history
-        self.update_state_machine()
+        self._update_state_machine()
 
         # call the callback functions
         for callback in self.on_message_callbacks:
@@ -345,6 +351,27 @@ class Roomba:
         str_command = json.dumps(roomba_command)
         self.log.debug("Publishing Roomba Setting : %s" % str_command)
         self.remote_client.publish("delta", str_command)
+
+    def add_map_definition(self, map: RoombaMap):
+        """Adds a map definition"""
+        self._maps[map.id] = map
+
+    def add_map_icon_set(
+        self,
+        name: str,
+        icon_path: str = "./assets",                    
+        home_icon_file: str = "home.png",
+        roomba_icon_file: str = "roomba.png",
+        roomba_error_file: str = "roombaerror.png",
+        roomba_cancelled_file: str = "roombacancelled.png",
+        roomba_battery_file: str = "roomba-charge.png",
+        bin_full_file: str = "binfull.png",
+        tank_low_file: str = "tanklow.png",
+        roomba_size=(50,50)):
+        """Adds a set of icons for map drawing use"""
+        self.mapper.add_icon_set(name, icon_path, home_icon_file, roomba_icon_file,
+        roomba_error_file, roomba_cancelled_file, roomba_battery_file, bin_full_file,
+        tank_low_file, roomba_size)  
 
     def dict_merge(self, dct, merge_dct):
         """
@@ -445,7 +472,7 @@ class Roomba:
         if value:
             self.timers[name]['reset'] = self.loop.call_later(duration, self.timer, name)  #reset reset timer in duration seconds
 
-    def update_history(self, property, value=None, cap=False):
+    def _update_history(self, property, value=None, cap=False):
         '''
         keep previous value
         '''
@@ -462,7 +489,7 @@ class Roomba:
                                   'previous': previous}
         return current
         
-    def set_history(self, property, value=None):
+    def _set_history(self, property, value=None):
         if isinstance(value, dict):
             value = value.copy()
         self.history[property] = {'current' : value,
@@ -506,9 +533,21 @@ class Roomba:
             self.log.warning(
                 "Error looking up not ready message {}".format(e))
             message = "Unknown not ready number: {}".format(not_ready_num)
-        return message                                                 
+        return message        
 
-    def decode_payload(self, topic, payload):
+    def _get_mission_map(self) -> RoombaMap:
+        return self._get_map(self._pmap_id)
+
+    def _get_map(self, map_id: str) -> RoombaMap:
+        try:
+            return self._maps[map_id]
+        except:
+            return self._get_default_map()
+
+    def _get_default_map(self) -> RoombaMap:
+        return RoombaMap("default","Default")                     
+
+    def _decode_payload(self, topic, payload):
         """
         Format json for pretty printing.
 
@@ -541,7 +580,7 @@ class Roomba:
             formatted_data = payload
         return formatted_data, dict(json_data)
 
-    def update_state_machine(self):
+    def _update_state_machine(self):
         '''
         Roomba progresses through states (phases), current identified states
         are:
@@ -608,10 +647,11 @@ class Roomba:
         Anything else = continue with existing map
         '''
 
-        mission = self.update_history("cycle")      #mission
-        phase = self.update_history("phase")        #mission phase
-        self.update_history("pose")                 #update co-ordinates
-        self.update_flags()
+        mission = self._update_history("cycle")      #mission
+        phase = self._update_history("phase")        #mission phase
+        self._update_history("pose")                 #update co-ordinates
+        self._update_flags()
+        self._update_map_id()
 
         if phase is None or mission is None:
             return
@@ -645,7 +685,7 @@ class Roomba:
             
         elif phase == "charge" and mission == 'none' and self.is_set('ignore_run'):
             self.log.info('Ignoring bogus charge/mission state')
-            self.update_history("cycle", self.previous('cycle'))
+            self._update_history("cycle", self.previous('cycle'))
             
         elif phase in ["hmPostMsn","hmMidMsn", "hmUsrDock"]:
             self.timer('ignore_run', True, 10)
@@ -655,7 +695,7 @@ class Roomba:
             if mission != 'none':
                 self.current_state = ROOMBA_STATES["new"]
                 self.timers['start'] = time.time()
-                self.mapper.reset_map()
+                self.mapper.reset_map(self._get_mission_map())
                 if isinstance(self.sku, str) and self.sku[0].lower() in ['i', 's', 'm']:
                     #self.timer('ignore_coordinates', True, 30)  #ignore updates for 30 seconds at start of new mission
                     pass
@@ -689,9 +729,10 @@ class Roomba:
             self.log.info("updated state to: {}".format(self.current_state))
 
         #draw the map, forcing a redraw if needed
-        self.mapper.update_map(current_mission != self.current_state)
+        if current_mission:
+            self.mapper.update_map(current_mission != self.current_state)
 
-    def update_flags(self):
+    def _update_flags(self):
         if not self.bin_full:
             self.clear_flags('bin_full')
             
@@ -726,3 +767,9 @@ class Roomba:
                     self.set_flags('bin_full')
                 else:
                     self.set_flags('battery_low')
+
+    def _update_map_id(self):
+        try:
+            self._pmap_id = self.get_property("pmap_id")
+        except:
+            pass

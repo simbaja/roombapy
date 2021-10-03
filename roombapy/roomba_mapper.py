@@ -40,7 +40,7 @@ def clamp(num, min_value, max_value):
 def interpolate(value, in_range, out_range) -> float:
     
     #handle inverted ranges
-    invert: False
+    invert = False
     if in_range[0] > in_range[1]:
         in_range = in_range[1], in_range[0]
         invert = not invert
@@ -51,7 +51,7 @@ def interpolate(value, in_range, out_range) -> float:
     #make sure it's in the range
     value = clamp(value, in_range[0], in_range[1])
 
-    out = float(value) / float((in_range[1] - in_range[0]) * (out_range[1] - out_range[0]))
+    out = float(value - in_range[0]) / float(in_range[1] - in_range[0]) * float(out_range[1] - out_range[0])
     if invert:
         out = float(out_range[1]) - out
 
@@ -86,6 +86,8 @@ def center_image(ox: int, oy: int, image: Image.Image, bounds: Tuple[int,int]) -
     if bounds:
         xx = clamp(xx, 0, bounds[0])
         yy = clamp(yy, 0, bounds[1])
+        
+    return (xx, yy)
             
 def make_transparent(image: Image.Image, color: Tuple = None):
     '''
@@ -108,13 +110,18 @@ def make_transparent(image: Image.Image, color: Tuple = None):
     image.putdata(newData)
     return image  
 
-
 def validate_color(color, default) -> Tuple[int,int,int,int]:      
     try:
         return ImageColor.getcolor(color,"RGBA")
     except:
         return default
-    
+
+def _get_mapper_asset(path: str, resource: str):
+    if path[0] == ".":
+        return os.path.normpath(os.path.join(os.path.dirname(__file__), path, resource))
+    else:
+        return os.path.normpath(os.path.join(path, resource))
+
 class icons():
     '''
     Roomba icons object
@@ -163,7 +170,7 @@ class icons():
             icon = Image.open(filename).convert('RGBA').resize(
                 size,Image.ANTIALIAS)
             icon = make_transparent(icon)
-            icon = icon.rotate(180-self.angle, expand=False)
+            icon = icon.rotate(self.angle, expand=False)
             self.icons[name] = icon
             return True
         except IOError as e:
@@ -254,23 +261,27 @@ class RoombaPosition(NamedTuple):
 class RoombaMap:
     id: str
     name: str
-    coords_start: Tuple[int,int]
-    coords_end: Tuple[int,int]
-    angle: float
+    coords_start: Tuple[int,int] = (-1000,-1000)
+    coords_end: Tuple[int,int] = (1000,1000)
+    angle: float = 0.0
     floorplan: Image.Image = None
     walls: Image.Image = None
     icon_set: str = None
 
     def __init__(
         self, 
-        coords_start: Tuple[int,int] = (0,0),
-        coords_end: Tuple[int,int] = (0,0),
+        id,
+        name,
+        coords_start: Tuple[int,int] = (-1000,-1000),
+        coords_end: Tuple[int,int] = (1000,1000),
         angle: float = 0,
         floorplan: str = None,
         walls: str = None,
         icon_set: str = None):
 
         self.log = logging.getLogger(__name__)
+        self.id = id,
+        self.name = name,
         self.coords_start = coords_start
         self.coords_end = coords_end
         self.angle = angle
@@ -319,7 +330,7 @@ class RoombaMapper:
     ):
         self.log = logging.getLogger(__name__)
         self.roomba = roomba
-        self.map_enabled = roomba.cap.get("pose", False) and HAVE_PIL
+        self.map_enabled = False
         self.bg_color = bg_color
         self.path_color = path_color
         self.text_color = text_color
@@ -331,7 +342,7 @@ class RoombaMapper:
         self.font = font
         if self.font is None:
             try:
-                self.font = ImageFont.truetype(os.path.join(assets_path, "FreeMono.ttf"), 40)
+                self.font = ImageFont.truetype(_get_mapper_asset(assets_path, "FreeMono.ttf"), 40)
             except IOError as e:
                 self.log.warning("error loading font: %s, loading default font".format(e))
                 self.font = ImageFont.load_default()
@@ -368,7 +379,7 @@ class RoombaMapper:
     def bg_color(self) -> Tuple[int,int,int,int]:
         return self._bg_color
     
-    @property.setter
+    @bg_color.setter
     def bg_color(self, value):
         self._bg_color = validate_color(value, DEFAULT_BG_COLOR)
     
@@ -376,7 +387,7 @@ class RoombaMapper:
     def path_color(self) -> Tuple[int,int,int,int]:
         return self._path_color
     
-    @property.setter
+    @path_color.setter
     def path_color(self, value):
         self._path_color = validate_color(value, DEFAULT_PATH_COLOR)
 
@@ -384,7 +395,7 @@ class RoombaMapper:
     def text_color(self) -> Tuple[int,int,int,int]:
         return self._text_color
     
-    @property.setter
+    @text_color.setter
     def text_color(self, value):
         self._text_color = validate_color(value, DEFAULT_TEXT_COLOR)
 
@@ -392,7 +403,7 @@ class RoombaMapper:
     def text_bg_color(self) -> Tuple[int,int,int,int]:
         return self._text_bg_color
     
-    @property.setter
+    @text_bg_color.setter
     def text_bg_color(self, value):
         self._text_bg_color = validate_color(value, DEFAULT_TEXT_BG_COLOR)
 
@@ -415,23 +426,24 @@ class RoombaMapper:
         i = icons(base_icon=None, angle=0, fnt=self.font, size=(32,32), log=self.log)
 
         if roomba_icon_file:
-            i.load_icon_file('roomba', os.path.join(icon_path, roomba_icon_file), roomba_size)
+            i.load_icon_file('roomba', _get_mapper_asset(icon_path, roomba_icon_file), roomba_size)
         if roomba_error_file:
-            i.load_icon_file('stuck', os.path.join(icon_path, roomba_error_file), roomba_size)
+            i.load_icon_file('stuck', _get_mapper_asset(icon_path, roomba_error_file), roomba_size)
         if roomba_cancelled_file:
-            i.load_icon_file('cancelled', os.path.join(icon_path, roomba_cancelled_file), roomba_size)
+            i.load_icon_file('cancelled', _get_mapper_asset(icon_path, roomba_cancelled_file), roomba_size)
         if roomba_battery_file:
-            i.load_icon_file('battery', os.path.join(icon_path, roomba_battery_file), roomba_size)
+            i.load_icon_file('battery', _get_mapper_asset(icon_path, roomba_battery_file), roomba_size)
         if bin_full_file:
-            i.load_icon_file('bin full', os.path.join(icon_path, bin_full_file), roomba_size)
+            i.load_icon_file('bin full', _get_mapper_asset(icon_path, bin_full_file), roomba_size)
         if tank_low_file:
-            i.load_icon_file('tank low', os.path.join(icon_path, tank_low_file), roomba_size)
+            i.load_icon_file('tank low', _get_mapper_asset(icon_path, tank_low_file), roomba_size)
         if home_icon_file:
-            i.load_icon_file('home', os.path.join(icon_path, home_icon_file), (32,32))
+            i.load_icon_file('home', _get_mapper_asset(icon_path, home_icon_file), (32,32))
 
         self.icons[name] = i
 
     def reset_map(self, map: RoombaMap, points_to_skip: int = DEFAULT_MAP_SKIP_POINTS):
+        self.map_enabled = self.roomba.cap.get("pose", False) and HAVE_PIL        
         self._history = []
         self._history_translated = []
         self._map = map
@@ -475,7 +487,7 @@ class RoombaMapper:
         elif self.roomba.current_state == ROOMBA_STATES["completed"]:
             self.log.info("MAP [State Update]: Mission Complete")  
         elif self.roomba.current_state == ROOMBA_STATES["run"]:            
-            if self.roomba.co_ords == self.zero_coords(theta=0):
+            if self.roomba.co_ords == self.roomba.zero_coords(theta=0):
                 #bogus pose received, can't have 0,0,0 when running, usually happens after recovering from an error condition
                 self.log.warning('MAP [State Update]: received 0,0,0 pose when running - ignoring')
                 position = None
@@ -569,6 +581,10 @@ class RoombaMapper:
             base.save(stream, format="PNG")
             self._rendered_map = stream.getvalue()
 
+        try:
+            base.save('c:\\temp\\map.png',"PNG")
+        except:
+            pass
         #call event handlers
         
     def _map_blank_image(self, color=transparent) -> Image.Image:
@@ -580,7 +596,7 @@ class RoombaMapper:
             renderer = ImageDraw.Draw(layer)
 
             renderer.line(
-                map(lambda p: (p.x,p.y), self._history_translated),
+                list(map(lambda p: (p.x,p.y), self._history_translated)),
                 fill=self.path_color,
                 width=self.path_width,
                 joint="curve"
@@ -606,7 +622,7 @@ class RoombaMapper:
         #add in the roomba icon
         layer.paste(
             icon_set.icons['roomba'].rotate(theta, expand=False),
-            center_image(x, y, self.icons['roomba'], layer.size)            
+            center_image(x, y, icon_set.icons['roomba'], layer.size)            
         )
 
         #add the dock
@@ -731,7 +747,7 @@ class RoombaMapper:
 
         return display_state, display_attributes, display_time    
 
-    def _map_distance(self, pos1: Tuple(int,int), pos2: Tuple(int,int)):
+    def _map_distance(self, pos1: 'Tuple[int,int]', pos2: 'Tuple[int,int]'):
         return int(math.sqrt(((pos2[0]-pos1[0])**2)+((pos2[1]-pos1[1])**2)))  
 
     def _interpolate_path_color(f_co, t_co, interval):

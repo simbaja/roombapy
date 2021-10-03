@@ -110,6 +110,7 @@ ROOMBA_STATES = {
     "dock": "Docking",
     "dockend": "Docking - End Mission",
     "cancelled": "Cancelled",
+    "completed": "Mission Completed",    
     "stop": "Stopped",
     "pause": "Paused",
     "hmPostMsn": "End Mission",
