@@ -355,15 +355,22 @@ class RoombaMapper:
 
     @property
     def min_coords(self) -> Tuple[int,int]:
+
         if len(self._history) > 0:
-            return min(self._history)[0], min(self._history)[1]
+            return (
+                min(list(map(lambda p: p["x"], self._history))), 
+                min(list(map(lambda p: p["y"], self._history)))
+            )
         else:
             return (0,0)
 
     @property
     def max_coords(self) -> Tuple[int,int]:
         if len(self._history) > 0:
-            return max(self._history)[0], max(self._history)[1]
+            return (
+                max(list(map(lambda p: p["x"], self._history))), 
+                max(list(map(lambda p: p["y"], self._history)))
+            )
         else:
             return (0,0)          
 
@@ -557,20 +564,18 @@ class RoombaMapper:
         
         #adjust theta
         #from what I can see, it looks like the roomba uses a coordinate system:
-        #0 = facing the dock, increasing angle clockwise
+        #0 = facing away from the dock, increasing angle counter-clockwise
         #it looks like past 180, the roomba uses negative angles, but still seems
-        #to be in the clockwise direction
+        #to be in the counter-clockwise direction
         #PIL denotes angles in the counterclockwise direction
         #so, to compute the right angle, we need to:
-        #1) add the map angle (clockwise)
+        #1) add map angle
+        #2) add 180 degrees (roomba image faces up, but should face away at 0)
         #2) add theta
         #3) mod 360, add 360 if negative
-        #4) convert to counter-clockwise 360-x
-        img_theta = (self._map.angle + 
-            theta) % 360
+        img_theta = (self._map.angle + theta + 180) % 360
         if img_theta < 0:
             img_theta += 360        
-        img_theta = 360 - img_theta
         
         #return the tuple
         return RoombaPosition(int(img_x), int(img_y), int(img_theta))
