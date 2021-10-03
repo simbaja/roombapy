@@ -314,7 +314,7 @@ class RoombaMapper:
         self.font = font
         if self.font is None:
             try:
-                self.font = ImageFont.truetype(_get_mapper_asset(assets_path, "FreeMono.ttf"), 40)
+                self.font = ImageFont.truetype(_get_mapper_asset(assets_path, "monaco.ttf"), 40)
             except IOError as e:
                 self.log.warning("error loading font: %s, loading default font".format(e))
                 self.font = ImageFont.load_default()
