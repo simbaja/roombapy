@@ -205,7 +205,15 @@ class Roomba:
         
     @property
     def regions(self):
-        return self.get_property("regions")        
+        return self.get_property("regions")
+
+    @property
+    def min_map_coords(self):
+        return self._mapper.min_coords
+    
+    @property
+    def max_map_coords(self):
+        return self._mapper.max_coords
 
     def register_on_message_callback(self, callback):
         self.on_message_callbacks.append(callback)

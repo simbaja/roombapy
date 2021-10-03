@@ -347,6 +347,20 @@ class RoombaMapper:
         return self._map_coord_to_image_coord(self.roomba.zero_coords())
 
     @property
+    def min_coords(self) -> Tuple[int,int]:
+        if len(self._history) > 0:
+            return min(self._history)[0], min(self._history)[1]
+        else:
+            return (0,0)
+
+    @property
+    def max_coords(self) -> Tuple[int,int]:
+        if len(self._history) > 0:
+            return max(self._history)[0], max(self._history)[1]
+        else:
+            return (0,0)          
+
+    @property
     def rendered_map(self) -> bytes:
         return self._rendered_map
 
@@ -376,7 +390,7 @@ class RoombaMapper:
 
     @property
     def text_bg_color(self) -> Tuple[int,int,int,int]:
-        return self._text_bg_color
+        return self._text_bg_color      
     
     @text_bg_color.setter
     def text_bg_color(self, value):
