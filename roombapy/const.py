@@ -129,3 +129,14 @@ DEFAULT_TEXT_BG_COLOR = (0,0,0,180)
 DEFAULT_IMG_HEIGHT = 1000
 DEFAULT_IMG_WIDTH = 1000
 DEFAULT_PATH_WIDTH = 2
+
+DEFAULT_ICON_PATH = "{PKG}/assets"
+DEFAULT_ICON_SIZE = (50,50)
+DEFAULT_ICON_HOME = "home.png"
+DEFAULT_ICON_ROOMBA = "r865_icon.png"
+DEFAULT_ICON_ERROR = "overlay-error.png"
+DEFAULT_ICON_CANCELLED = "overlay-cancelled.png"
+DEFAULT_ICON_CHARGING = "overlay-charging.png"
+DEFAULT_ICON_BATTERY = "overlay-battery-low.png"
+DEFAULT_ICON_BIN_FULL = "overlay-bin-full.png"
+DEFAULT_ICON_TANK_LOW = "overlay-tank-low.png"

@@ -25,7 +25,12 @@ from collections import OrderedDict
 from collections.abc import Mapping
 from datetime import datetime
 
-from roombapy.const import ROOMBA_ERROR_MESSAGES, ROOMBA_READY_MESSAGES, ROOMBA_STATES
+from roombapy.const import (
+    DEFAULT_ICON_SIZE, 
+    ROOMBA_ERROR_MESSAGES, 
+    ROOMBA_READY_MESSAGES, 
+    ROOMBA_STATES
+)
 from roombapy.roomba_mapper import RoombaMap, RoombaMapper
 
 MAX_CONNECTION_RETRIES = 3
@@ -369,18 +374,21 @@ class Roomba:
         self,
         name: str,
         icon_path: str = "{PKG}/assets",                    
-        home_icon_file: str = "home.png",
-        roomba_icon_file: str = "r865_icon.png",
-        roomba_error_file: str = "overlay-error.png",
-        roomba_cancelled_file: str = "overlay-cancelled.png",
-        roomba_battery_file: str = "overlay-battery-low.png",
-        bin_full_file: str = "overlay-bin-full.png",
-        tank_low_file: str = "overlay-tank-low.png",
-        roomba_size=(50,50)):
+        home_icon = None,
+        roomba_icon = None,
+        error_icon = None,
+        cancelled_icon = None,
+        battery_low_icon = None,
+        charging_icon = None,
+        bin_full_icon = None,
+        tank_low_icon = None,
+        icon_size = DEFAULT_ICON_SIZE,
+        show_direction = True):
         """Adds a set of icons for map drawing use"""
-        self._mapper.add_icon_set(name, icon_path, home_icon_file, roomba_icon_file,
-        roomba_error_file, roomba_cancelled_file, roomba_battery_file, bin_full_file,
-        tank_low_file, roomba_size)  
+        self._mapper.add_icon_set(
+            name, icon_path, home_icon, roomba_icon, error_icon,
+            cancelled_icon, battery_low_icon,charging_icon,bin_full_icon,tank_low_icon,
+            icon_size,show_direction)  
 
     def dict_merge(self, dct, merge_dct):
         """

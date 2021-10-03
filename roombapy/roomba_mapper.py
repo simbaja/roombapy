@@ -11,6 +11,16 @@ if TYPE_CHECKING:
 
 from roombapy.const import (
     DEFAULT_BG_COLOR,
+    DEFAULT_ICON_BATTERY,
+    DEFAULT_ICON_BIN_FULL,
+    DEFAULT_ICON_CANCELLED,
+    DEFAULT_ICON_CHARGING,
+    DEFAULT_ICON_ERROR,
+    DEFAULT_ICON_HOME,
+    DEFAULT_ICON_PATH,
+    DEFAULT_ICON_ROOMBA,
+    DEFAULT_ICON_SIZE,
+    DEFAULT_ICON_TANK_LOW,
     DEFAULT_IMG_HEIGHT,
     DEFAULT_IMG_WIDTH,
     DEFAULT_MAP_MAX_ALLOWED_DISTANCE,
@@ -101,129 +111,126 @@ def validate_color(color, default) -> Tuple[int,int,int,int]:
     except:
         return default
 
-class icons():
-    '''
-    Roomba icons object
-    '''
-    def __init__(self, base_icon=None, font=None, size=(50,50), draw_direction=True, log=None):
+class RoombaIconSet:
+    def __init__(self, 
+        size: Tuple[int,int] = (50,50), 
+        show_direction: bool = True,
+        log: logging.Logger = None):
+
         if log:
-            self.log = log
+            self._log = log
         else:
-            self.log = logging.getLogger("Roomba.{}".format(__name__))
-        self.font = font
+            self._log = logging.getLogger(f"Roomba.{__name__}")
+        
         self.size = size
-        self.base_icon = base_icon
-        self.draw_direction = draw_direction
-        if self.base_icon is None:
-            self.base_icon = self.draw_base_icon()
-        
-        self.init_dict()
-                        
-    def init_dict(self):
-        self.icons = {  'roomba'    : self.create_icon('roomba'),
-                        'stuck'     : self.create_icon('stuck'),
-                        'cancelled' : self.create_icon('cancelled'),
-                        'battery'   : self.create_icon('battery'),
-                        'bin full'  : self.create_icon('bin full'),
-                        'tank low'  : self.create_icon('tank low'),
-                        'home'      : self.create_icon('home', (32,32))
-                     }
-                        
-    def __getitem__(self, name):
-        return self.icons.get(name)
-                        
-    def set_font(self, fnt):
-        self.font = fnt
-        self.init_dict()
-        
-    def create_default_icon(self, name, size=None):
-        self.icons[name] = self.create_icon(name, size)
-            
-    def load_icon_file(self, name, filename, size=None):
+        self.show_direction = show_direction
+        self._icons: dict[str,Image.Image] = {}
+        self._load_defaults()
+
+    @property
+    def roomba(self) -> Image.Image:
+        return self._icons["roomba"]
+    
+    @roomba.setter
+    def roomba(self, value):
+        self._set_icon("roomba", value)
+
+    @property
+    def error(self) -> Image.Image:
+        return self._icons["error"]
+    
+    @error.setter
+    def error(self, value):
+        self._set_icon("error", value)
+    
+    @property
+    def cancelled(self) -> Image.Image:
+        return self._icons["cancelled"]
+    
+    @cancelled.setter
+    def cancelled(self, value):
+        self._set_icon("cancelled", value)
+
+    @property
+    def battery_low(self) -> Image.Image:
+        return self._icons["battery-low"]
+    
+    @battery_low.setter
+    def battery_low(self, value):
+        self._set_icon("battery-low", value)
+
+    @property
+    def charging(self) -> Image.Image:
+        return self._icons["charging"]
+    
+    @charging.setter
+    def charging(self, value):
+        self._set_icon("charging", value)
+
+    @property
+    def bin_full(self) -> Image.Image:
+        return self._icons["bin-full"]
+    
+    @bin_full.setter
+    def bin_full(self, value):
+        self._set_icon("bin-full", value)
+
+    @property
+    def tank_low(self) -> Image.Image:
+        return self._icons["tank-low"]
+    
+    @tank_low.setter
+    def tank_low(self, value):
+        self._set_icon("tank-low", value)
+
+    @property
+    def home(self) -> Image.Image:
+        return self._icons["home"]
+    
+    @home.setter
+    def home(self, value):
+        self._set_icon("home", value)
+
+    def _load_defaults(self):
+        self._load_icon_file("roomba", _get_mapper_asset(DEFAULT_ICON_PATH, DEFAULT_ICON_ROOMBA))
+        self._load_icon_file("error", _get_mapper_asset(DEFAULT_ICON_PATH, DEFAULT_ICON_ERROR))
+        self._load_icon_file("cancelled", _get_mapper_asset(DEFAULT_ICON_PATH, DEFAULT_ICON_CANCELLED))
+        self._load_icon_file("battery-low", _get_mapper_asset(DEFAULT_ICON_PATH, DEFAULT_ICON_BATTERY))
+        self._load_icon_file("charging", _get_mapper_asset(DEFAULT_ICON_PATH, DEFAULT_ICON_CHARGING))
+        self._load_icon_file("bin-full", _get_mapper_asset(DEFAULT_ICON_PATH, DEFAULT_ICON_BIN_FULL))
+        self._load_icon_file("tank-low", _get_mapper_asset(DEFAULT_ICON_PATH, DEFAULT_ICON_TANK_LOW))
+        self._load_icon_file("home", _get_mapper_asset(DEFAULT_ICON_PATH, DEFAULT_ICON_HOME))
+
+    def _set_icon(self, name, value):
+        if value is None:
+            return    
+        if isinstance(value, str):
+            self._load_icon_file(name, value)
+            self._draw_direction(name)
+        elif isinstance(value, Image.Image):
+            resized = value.convert('RGBA').resize(self.size,Image.ANTIALIAS)
+            self._icons[name] = resized
+            self._draw_direction(name)
+        else:
+            raise ValueError()
+
+    def _load_icon_file(self, name, filename, size=None):
         try:
             if not size:
                 size = self.size
             icon = Image.open(filename).convert('RGBA').resize(
                 size,Image.ANTIALIAS)
-            if name == "roomba" and self.draw_direction:
-                draw_icon = ImageDraw.Draw(icon)
-                draw_icon.pieslice([(5,5),(icon.size[0]-5,icon.size[1]-5)],
-                    355, 5, fill="red", outline="red")                
-            self.icons[name] = icon
-            return True
+                    
+            self._icons[name] = icon
         except IOError as e:
-            self.log.warning('Error loading icon file: {} : {}'.format(filename, e))
-            self.create_default_icon(name, size)
-        return False
-            
-    def draw_base_icon(self, size=None):
-        if not HAVE_PIL:
-            return None
-            
-        icon = Image.new('RGBA', size if size else self.size, transparent)
-        draw_icon = ImageDraw.Draw(icon)
-        draw_icon.ellipse([(5,5),(icon.size[0]-5,icon.size[1]-5)],
-                fill="green", outline="black")
-        return icon
+            self._log.warning(f'Error loading icon file: {filename}: {e}')
 
-    def create_icon(self, icon_name, size=None):
-        '''
-        draw default icons, return icon drawing
-        '''
-        if not HAVE_PIL:
-            return None
-            
-        if not size:
-            size = self.size
-            
-        if icon_name in ['roomba', 'stuck', 'cancelled']:
-            icon = self.base_icon.copy().resize(size,Image.ANTIALIAS)
-        else:
-            icon = Image.new('RGBA', size, transparent)
-        draw_icon = ImageDraw.Draw(icon)
-        if icon_name == "roomba":
+    def _draw_direction(self, name):
+        icon = self._icons[name]
+        if name == "roomba" and self.show_direction:
+            draw_icon = ImageDraw.Draw(icon)
             draw_icon.pieslice([(5,5),(icon.size[0]-5,icon.size[1]-5)],
-                355, 5, fill="red", outline="red")
-        elif icon_name == "cancelled":
-            if self.font is not None:
-                draw_icon.text((4,-4), "X", font=self.font, fill=(255,0,0,255))
-        elif icon_name == "stuck":
-            draw_icon.polygon([(
-                icon.size[0]//2,icon.size[1]), (0, 0), (0,icon.size[1])],
-                fill = 'red')
-            if self.font is not None:
-                draw_icon.text((4,-4), "!", font=self.font,
-                    fill=(255,255,255,255))
-        elif icon_name == "bin full":
-            draw_icon.rectangle([
-                icon.size[0]-10, icon.size[1]-10,
-                icon.size[0]+10, icon.size[1]+10],
-                fill = "grey")
-            if self.font is not None:
-                draw_icon.text((4,-4), "F", font=self.font,
-                    fill=(255,255,255,255))
-        elif icon_name == "tank low":
-            draw_icon.rectangle([
-                icon.size[0]-10, icon.size[1]-10,
-                icon.size[0]+10, icon.size[1]+10],
-                fill = "blue")
-            if self.font is not None:
-                draw_icon.text((4,-4), "L", font=self.font,
-                    fill=(255,255,255,255))
-        elif icon_name == "battery":
-            draw_icon.rectangle([icon.size[0]-10, icon.size[1]-10,
-                icon.size[0]+10,icon.size[1]+10], fill = "orange")
-            if self.font is not None:
-                draw_icon.text((4,-4), "B", font=self.font,
-                    fill=(255,255,255,255))
-        elif icon_name == "home":
-            draw_icon.rectangle([0,0,32,32], fill="red", outline="black")
-            if self.font is not None:
-                draw_icon.text((4,-4), "D", font=self.font,
-                    fill=(255,255,255,255))
-        else:
-            return None
-        return icon
+                265, 275, fill="red", outline="red")
 
 class RoombaPosition(NamedTuple):
     x: int
@@ -316,15 +323,15 @@ class RoombaMapper:
             try:
                 self.font = ImageFont.truetype(_get_mapper_asset(assets_path, "monaco.ttf"), 40)
             except IOError as e:
-                self.log.warning("error loading font: %s, loading default font".format(e))
+                self.log.warning(f"Error loading font, loading default font")
                 self.font = ImageFont.load_default()
 
         #generate the default icons
-        self.icons: dict[str,icons] = {}
+        self._icons: dict[str,RoombaIconSet] = {}
         self.add_icon_set("default"),
-        self.add_icon_set("m", roomba_icon_file="m6_icon.png")
-        self.add_icon_set("j", roomba_icon_file="j7_icon.png")
-        self.add_icon_set("s", roomba_icon_file="s9_icon.png")
+        self.add_icon_set("m", roomba_icon="m6_icon.png")
+        self.add_icon_set("j", roomba_icon="j7_icon.png")
+        self.add_icon_set("s", roomba_icon="s9_icon.png")
 
         #mapping variables
         self._map: RoombaMap = None
@@ -399,38 +406,49 @@ class RoombaMapper:
     def add_icon_set(self,
         name: str,
         icon_path: str = "{PKG}/assets",                    
-        home_icon_file: str = "home.png",
-        roomba_icon_file: str = "r865_icon.png",
-        roomba_error_file: str = "overlay-error.png",
-        roomba_cancelled_file: str = "overlay-cancelled.png",
-        roomba_battery_file: str = "overlay-battery-low.png",
-        bin_full_file: str = "overlay-bin-full.png",
-        tank_low_file: str = "overlay-tank-low.png",
-        roomba_size=(50,50),
-        draw_direction = True
+        home_icon = None,
+        roomba_icon = None,
+        error_icon = None,
+        cancelled_icon = None,
+        battery_low_icon = None,
+        charging_icon = None,
+        bin_full_icon = None,
+        tank_low_icon = None,
+        icon_size = DEFAULT_ICON_SIZE,
+        show_direction = True
     ):
         if not name:
             self.log.error("Icon sets must have names")
             return
 
-        i = icons(base_icon=None, font=self.font, size=roomba_size, draw_direction=draw_direction, log=self.log)
+        i = RoombaIconSet(size=icon_size, show_direction=show_direction, log=self.log)
 
-        if roomba_icon_file:
-            i.load_icon_file('roomba', _get_mapper_asset(icon_path, roomba_icon_file), roomba_size)
-        if roomba_error_file:
-            i.load_icon_file('stuck', _get_mapper_asset(icon_path, roomba_error_file), roomba_size)
-        if roomba_cancelled_file:
-            i.load_icon_file('cancelled', _get_mapper_asset(icon_path, roomba_cancelled_file), roomba_size)
-        if roomba_battery_file:
-            i.load_icon_file('battery', _get_mapper_asset(icon_path, roomba_battery_file), roomba_size)
-        if bin_full_file:
-            i.load_icon_file('bin full', _get_mapper_asset(icon_path, bin_full_file), roomba_size)
-        if tank_low_file:
-            i.load_icon_file('tank low', _get_mapper_asset(icon_path, tank_low_file), roomba_size)
-        if home_icon_file:
-            i.load_icon_file('home', _get_mapper_asset(icon_path, home_icon_file), (32,32))
+        if roomba_icon:
+            i.roomba = self._get_mapper_asset(icon_path, roomba_icon)
+        if error_icon:
+            i.error = self._get_mapper_asset(icon_path, error_icon)
+        if cancelled_icon:
+            i.cancelled = self._get_mapper_asset(icon_path, cancelled_icon)
+        if battery_low_icon:
+            i.battery_low = self._get_mapper_asset(icon_path, battery_low_icon)
+        if charging_icon:
+            i.charging = self._get_mapper_asset(icon_path, charging_icon)
+        if bin_full_icon:
+            i.bin_full = self._get_mapper_asset(icon_path, bin_full_icon)
+        if tank_low_icon:
+            i.tank_low = self._get_mapper_asset(icon_path, tank_low_icon)
+        if home_icon:
+            i.home = self._get_mapper_asset(icon_path, home_icon)
 
-        self.icons[name] = i
+        self._icons[name] = i
+
+    def _get_mapper_asset(self, icon_path: str, icon):
+        if isinstance(icon, str):
+            return _get_mapper_asset(icon_path, icon)
+        if isinstance(icon, Image.Image):
+            return icon
+        else:
+            return None
 
     def reset_map(self, map: RoombaMap, points_to_skip: int = DEFAULT_MAP_SKIP_POINTS):
         self.map_enabled = self.roomba.cap.get("pose", False) and HAVE_PIL        
@@ -538,7 +556,21 @@ class RoombaMapper:
         clamp(img_y, 0, self._map.img_height)
         
         #adjust theta
-        img_theta = theta + self._map.angle
+        #from what I can see, it looks like the roomba uses a coordinate system:
+        #0 = facing the dock, increasing angle clockwise
+        #it looks like past 180, the roomba uses negative angles, but still seems
+        #to be in the clockwise direction
+        #PIL denotes angles in the counterclockwise direction
+        #so, to compute the right angle, we need to:
+        #1) add the map angle (clockwise)
+        #2) add theta
+        #3) mod 360, add 360 if negative
+        #4) convert to counter-clockwise 360-x
+        img_theta = (self._map.angle + 
+            theta) % 360
+        if img_theta < 0:
+            img_theta += 360        
+        img_theta = 360 - img_theta
         
         #return the tuple
         return RoombaPosition(int(img_x), int(img_y), int(img_theta))
@@ -597,15 +629,22 @@ class RoombaMapper:
             return base
 
     def _get_icon_set(self):
-        icon_set_name = "default"
-        if not self._map.icon_set:
-            series = self.icons.get(self.roomba.sku[0],None)            
-            if series:
-                icon_set_name = series
-        else:
-            icon_set_name = self._map.icon_set
+        #get the default (should always exist)
+        icon_set = self._icons["default"]
 
-        return self.icons[icon_set_name]
+        #attempt to get the series specific set
+        series = self._icons.get(self.roomba.sku[0],None)            
+        if series:
+            icon_set = series
+
+        #override with the map set if needed
+        if self._map.icon_set:
+            try:
+                icon_set = self._icons[self._map.icon_set]
+            except:
+                self.log.warn(f"Could not load icon set '{self._map.icon_set}' for map.")
+
+        return icon_set
 
     def _draw_roomba(self, base: Image.Image) -> Image.Image:
         layer = self._map_blank_image()
@@ -617,19 +656,17 @@ class RoombaMapper:
         icon_set = self._get_icon_set()
 
         #add in the roomba icon
-        layer.paste(
-            icon_set.icons['roomba'].rotate(theta, expand=False),
-            center_image(x, y, icon_set.icons['roomba'], layer.size)            
-        )
+        rotated = icon_set.roomba.rotate(theta, expand=True)
+        layer.paste(rotated, center_image(x, y, rotated, layer.size))
 
         #add the dock
         dock = self._map_blank_image()
         dock.paste(
-            icon_set.icons['home'],
+            icon_set.home,
             center_image(
                 self.origin_image_pos.x, 
                 self.origin_image_pos.y, 
-                icon_set.icons['home'], layer.size
+                icon_set.home, layer.size
             )
         )
 
@@ -638,15 +675,15 @@ class RoombaMapper:
         #add the problem icon (pick one in a priority order)
         problem_icon = None
         if self.roomba._flags.get('stuck'):
-            problem_icon = icon_set.icons['stuck']
+            problem_icon = icon_set.error
         elif self.roomba._flags.get('cancelled'):
-            problem_icon = icon_set.icons['cancelled']
+            problem_icon = icon_set.cancelled
         elif self.roomba._flags.get('bin_full'):
-            problem_icon = icon_set.icons['bin full']
+            problem_icon = icon_set.bin_full
         elif self.roomba._flags.get('battery_low'):
-            problem_icon = icon_set.icons['battery']
+            problem_icon = icon_set.battery_low
         elif self.roomba._flags.get('tank_low'):
-            problem_icon = icon_set.icons['tank low']
+            problem_icon = icon_set.tank_low
 
         if problem_icon:
             problem = self._map_blank_image()
