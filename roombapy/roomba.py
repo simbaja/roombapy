@@ -85,8 +85,6 @@ class Roomba:
 
         #create the mapper
         self._mapper = RoombaMapper(self)
-        #replace the crude icons with ones loaded from our assets and make default
-        self._mapper.add_icon_set("default")
         self._history = {}
         self._timers = {}
         self._flags = {}
@@ -182,7 +180,7 @@ class Roomba:
         return self.get_property("cap")
     
     @property
-    def sku(self):
+    def sku(self) -> str:
         return self.get_property("sku")
         
     @property
@@ -364,12 +362,12 @@ class Roomba:
         name: str,
         icon_path: str = "{PKG}/assets",                    
         home_icon_file: str = "home.png",
-        roomba_icon_file: str = "roomba.png",
-        roomba_error_file: str = "roombaerror.png",
-        roomba_cancelled_file: str = "roombacancelled.png",
-        roomba_battery_file: str = "roomba-charge.png",
-        bin_full_file: str = "binfull.png",
-        tank_low_file: str = "tanklow.png",
+        roomba_icon_file: str = "r865_icon.png",
+        roomba_error_file: str = "overlay-error.png",
+        roomba_cancelled_file: str = "overlay-cancelled.png",
+        roomba_battery_file: str = "overlay-battery-low.png",
+        bin_full_file: str = "overlay-bin-full.png",
+        tank_low_file: str = "overlay-tank-low.png",
         roomba_size=(50,50)):
         """Adds a set of icons for map drawing use"""
         self._mapper.add_icon_set(name, icon_path, home_icon_file, roomba_icon_file,

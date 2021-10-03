@@ -95,27 +95,6 @@ def center_image(ox: int, oy: int, image: Image.Image, bounds: Tuple[int,int]) -
         
     return (xx, yy)
             
-def make_transparent(image: Image.Image, color: Tuple = None):
-    '''
-    take image and make white areas transparent
-    return transparent image
-    '''
-    image = image.convert("RGBA")
-    datas = image.getdata()
-    newData = []
-    for item in datas:
-        # white (ish)
-        if item[0] >= 254 and item[1] >= 254 and item[2] >= 254:
-            newData.append(transparent)
-        else:
-            if color:
-                newData.append(color)
-            else:
-                newData.append(item)
-
-    image.putdata(newData)
-    return image  
-
 def validate_color(color, default) -> Tuple[int,int,int,int]:      
     try:
         return ImageColor.getcolor(color,"RGBA")
@@ -126,7 +105,7 @@ class icons():
     '''
     Roomba icons object
     '''
-    def __init__(self, base_icon=None, font=None, size=(50,50), log=None):
+    def __init__(self, base_icon=None, font=None, size=(50,50), draw_direction=True, log=None):
         if log:
             self.log = log
         else:
@@ -134,6 +113,7 @@ class icons():
         self.font = font
         self.size = size
         self.base_icon = base_icon
+        self.draw_direction = draw_direction
         if self.base_icon is None:
             self.base_icon = self.draw_base_icon()
         
@@ -165,7 +145,10 @@ class icons():
                 size = self.size
             icon = Image.open(filename).convert('RGBA').resize(
                 size,Image.ANTIALIAS)
-            icon = make_transparent(icon)
+            if name == "roomba" and self.draw_direction:
+                draw_icon = ImageDraw.Draw(icon)
+                draw_icon.pieslice([(5,5),(icon.size[0]-5,icon.size[1]-5)],
+                    355, 5, fill="red", outline="red")                
             self.icons[name] = icon
             return True
         except IOError as e:
@@ -198,10 +181,6 @@ class icons():
         else:
             icon = Image.new('RGBA', size, transparent)
         draw_icon = ImageDraw.Draw(icon)
-        if icon_name in ['stuck', 'cancelled']:
-            draw_icon.pieslice([(5,5),(icon.size[0]-5,icon.size[1]-5)],
-                175, 185, fill="red", outline="red")
-
         if icon_name == "roomba":
             draw_icon.pieslice([(5,5),(icon.size[0]-5,icon.size[1]-5)],
                 355, 5, fill="red", outline="red")
@@ -342,7 +321,10 @@ class RoombaMapper:
 
         #generate the default icons
         self.icons: dict[str,icons] = {}
-        self.icons["default"] = icons(base_icon=None, font=self.font, size=(32,32), log=self.log)
+        self.add_icon_set("default"),
+        self.add_icon_set("m", roomba_icon_file="m6_icon.png")
+        self.add_icon_set("j", roomba_icon_file="j7_icon.png")
+        self.add_icon_set("s", roomba_icon_file="s9_icon.png")
 
         #mapping variables
         self._map: RoombaMap = None
@@ -404,19 +386,20 @@ class RoombaMapper:
         name: str,
         icon_path: str = "{PKG}/assets",                    
         home_icon_file: str = "home.png",
-        roomba_icon_file: str = "roomba.png",
-        roomba_error_file: str = "roombaerror.png",
-        roomba_cancelled_file: str = "roombacancelled.png",
-        roomba_battery_file: str = "roomba-charge.png",
-        bin_full_file: str = "binfull.png",
-        tank_low_file: str = "tanklow.png",
-        roomba_size=(50,50)        
+        roomba_icon_file: str = "r865_icon.png",
+        roomba_error_file: str = "overlay-error.png",
+        roomba_cancelled_file: str = "overlay-cancelled.png",
+        roomba_battery_file: str = "overlay-battery-low.png",
+        bin_full_file: str = "overlay-bin-full.png",
+        tank_low_file: str = "overlay-tank-low.png",
+        roomba_size=(50,50),
+        draw_direction = True
     ):
         if not name:
             self.log.error("Icon sets must have names")
             return
 
-        i = icons(base_icon=None, font=self.font, size=(32,32), log=self.log)
+        i = icons(base_icon=None, font=self.font, size=roomba_size, draw_direction=draw_direction, log=self.log)
 
         if roomba_icon_file:
             i.load_icon_file('roomba', _get_mapper_asset(icon_path, roomba_icon_file), roomba_size)
@@ -599,6 +582,17 @@ class RoombaMapper:
         else:
             return base
 
+    def _get_icon_set(self):
+        icon_set_name = "default"
+        if not self._map.icon_set:
+            series = self.icons.get(self.roomba.sku[0],None)            
+            if series:
+                icon_set_name = series
+        else:
+            icon_set_name = self._map.icon_set
+
+        return self.icons[icon_set_name]
+
     def _draw_roomba(self, base: Image.Image) -> Image.Image:
         layer = self._map_blank_image()
 
@@ -606,11 +600,7 @@ class RoombaMapper:
         x, y, theta = self.roomba_image_pos
 
         #get the icon set to use
-        icon_set_name = "default"
-        if self._map.icon_set:
-            icon_set_name = self._map.icon_set
-
-        icon_set = self.icons[icon_set_name]
+        icon_set = self._get_icon_set()
 
         #add in the roomba icon
         layer.paste(
@@ -679,7 +669,7 @@ class RoombaMapper:
         renderer.rectangle(bbox, fill=self.text_bg_color)
 
         #render the text
-        renderer.multiline_text((margin,margin), combined_text, fill=self.text_color)
+        renderer.multiline_text((margin,margin), combined_text, fill=self.text_color, font=self.font)
 
         return Image.alpha_composite(base, layer)
 
