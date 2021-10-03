@@ -84,12 +84,13 @@ class Roomba:
         self.client_error = None
 
         #create the mapper
-        self.mapper = RoombaMapper(self)
+        self._mapper = RoombaMapper(self)
         #replace the crude icons with ones loaded from our assets and make default
-        self.mapper.add_icon_set("default")
-        self.history = {}
-        self.timers = {}
-        self.flags = {}
+        self._mapper.add_icon_set("default")
+        self._history = {}
+        self._timers = {}
+        self._flags = {}
+        self._new_mission_start_time: float = None
 
         self._pmap_id: str = None
         self._maps: dict[str,RoombaMap] = {}
@@ -117,7 +118,7 @@ class Roomba:
         
     @property
     def error_message(self):
-        return self.get_error_message(self.error_num)
+        return self._get_error_message(self.error_num)
 
     @property
     def not_ready_num(self):
@@ -129,7 +130,7 @@ class Roomba:
     
     @property
     def not_ready_message(self):
-        return self.get_not_ready_message(self.not_ready_num)    
+        return self._get_not_ready_message(self.not_ready_num)    
         
     @property
     def cleanMissionStatus(self):
@@ -159,7 +160,7 @@ class Roomba:
         start_time = self.get_property("mssnStrtTm")
         if start_time:
             return int((datetime.now() - datetime.fromtimestamp(start_time)).total_seconds()//60)
-        start = self.timers.get('start')
+        start = self._timers.get('start')
         if start:
             return int((time.time()-start)//60)
         return None
@@ -354,12 +355,14 @@ class Roomba:
 
     def add_map_definition(self, map: RoombaMap):
         """Adds a map definition"""
+        if not map.id:
+            raise ValueError(map.id)   
         self._maps[map.id] = map
 
     def add_map_icon_set(
         self,
         name: str,
-        icon_path: str = "./assets",                    
+        icon_path: str = "{PKG}/assets",                    
         home_icon_file: str = "home.png",
         roomba_icon_file: str = "roomba.png",
         roomba_error_file: str = "roombaerror.png",
@@ -369,7 +372,7 @@ class Roomba:
         tank_low_file: str = "tanklow.png",
         roomba_size=(50,50)):
         """Adds a set of icons for map drawing use"""
-        self.mapper.add_icon_set(name, icon_path, home_icon_file, roomba_icon_file,
+        self._mapper.add_icon_set(name, icon_path, home_icon_file, roomba_icon_file,
         roomba_error_file, roomba_cancelled_file, roomba_battery_file, bin_full_file,
         tank_low_file, roomba_size)  
 
@@ -424,53 +427,47 @@ class Roomba:
         return self.recursive_lookup(self.master_state, property, cap)
 
     def set_flags(self, flags=None):
-        self.handle_flags(flags, True)
+        self._handle_flags(flags, True)
         
     def clear_flags(self, flags=None):
-        self.handle_flags(flags)
+        self._handle_flags(flags)
         
-    def flag_set(self, flag):
+    def flag_set(self, flag) -> bool:
         try:
-            return self.master_state['state']['flags'].get(flag, False)
+            return self._flags.get(flag, False)
         except KeyError:
             pass
         return False
             
-    def handle_flags(self, flags=None, set=False):
-        self.master_state['state'].setdefault('flags', {})
+    def _handle_flags(self, flags=None, set=False):
         if isinstance(flags, str):
             flags = [flags]
         if flags:
             for flag in flags:
                 if set:
-                    if not self.flag_set(flag):
-                        self.flags[flag] = True
-                    self.master_state['state']['flags'].update(self.flags)
+                    self._flags[flag] = True
                 else:
-                    self.flags.pop(flag, None)
-                    self.master_state['state']['flags'].pop(flag, None)
+                    self._flags.pop(flag, None)
         else:
-            self.flags = {}
-            if not set:
-                self.master_state['state']['flags'] = self.flags
+            self._flags = {}
 
-    def is_set(self, name):
-        return self.timers.get(name, {}).get('value', False)
+    def timer_active(self, name) -> bool:
+        return self._timers.get(name, {}).get('value', False)
         
-    def when_run(self, name):
-        th = self.timers.get(name, {}).get('reset', None)
+    def timer_duration(self, name) -> int:
+        th = self._timers.get(name, {}).get('reset', None)
         if th:
             return max(0, int(th._when - self.loop.time()))
         return 0
     
-    def timer(self, name, value=False, duration=10):
-        self.timers.setdefault(name, {})
-        self.timers[name]['value'] = value
+    def _set_timer(self, name, value=False, duration=10):
+        self._timers.setdefault(name, {})
+        self._timers[name]['value'] = value
         self.log.info('Set {} to: {}'.format(name, value))
-        if self.timers[name].get('reset'):
-            self.timers[name]['reset'].cancel()    
+        if self._timers[name].get('reset'):
+            self._timers[name]['reset'].cancel()    
         if value:
-            self.timers[name]['reset'] = self.loop.call_later(duration, self.timer, name)  #reset reset timer in duration seconds
+            self._timers[name]['reset'] = self.loop.call_later(duration, self._set_timer, name)  #reset reset timer in duration seconds
 
     def _update_history(self, property, value=None, cap=False):
         '''
@@ -482,27 +479,27 @@ class Roomba:
             current = self.get_property(property, cap)
         if isinstance(current, dict):
             current = current.copy()
-        previous = self.history.get(property, {}).get('current')
+        previous = self._history.get(property, {}).get('current')
         if previous is None:
             previous = current
-        self.history[property] = {'current' : current,
+        self._history[property] = {'current' : current,
                                   'previous': previous}
         return current
         
     def _set_history(self, property, value=None):
         if isinstance(value, dict):
             value = value.copy()
-        self.history[property] = {'current' : value,
+        self._history[property] = {'current' : value,
                                   'previous': value}
         
     def current(self, property):
-        return self.history.get(property, {}).get('current')
+        return self._history.get(property, {}).get('current')
         
     def previous(self, property):
-        return self.history.get(property, {}).get('previous')
+        return self._history.get(property, {}).get('previous')
         
     def changed(self, property):
-        changed = self.history.get(property, {}).get('current') != self.history.get(property, {}).get('previous')
+        changed = self._history.get(property, {}).get('current') != self._history.get(property, {}).get('previous')
         return changed
 
     def zero_coords(self, theta=180):
@@ -517,7 +514,7 @@ class Roomba:
         '''
         return {"theta":theta,"point":{"x":0,"y":0}}  
 
-    def get_error_message(self, error_num):
+    def _get_error_message(self, error_num):
         try:
             error_message = ROOMBA_ERROR_MESSAGES[error_num]
         except KeyError as e:
@@ -526,7 +523,7 @@ class Roomba:
             error_message = "Unknown Error number: {}".format(error_num)
         return error_message   
 
-    def get_not_ready_message(self, not_ready_num):
+    def _get_not_ready_message(self, not_ready_num):
         try:
             message = ROOMBA_READY_MESSAGES[not_ready_num]
         except KeyError as e:
@@ -676,36 +673,36 @@ class Roomba:
             
         if self.current_state == ROOMBA_STATES["new"] and phase != 'run':
             self.log.info('waiting for run state for New Missions')
-            if time.time() - self.timers['start'] >= 20:
+            if time.time() - self._new_mission_start_time >= 20:
                 self.log.warning('Timeout waiting for run state')
                 self.current_state = ROOMBA_STATES[phase]
 
-        elif phase == "run" and (self.is_set('ignore_run') or mission == 'none'):
+        elif phase == "run" and (self.timer_active('ignore_run') or mission == 'none'):
             self.log.info('Ignoring bogus run state')
             
-        elif phase == "charge" and mission == 'none' and self.is_set('ignore_run'):
+        elif phase == "charge" and mission == 'none' and self.timer_active('ignore_run'):
             self.log.info('Ignoring bogus charge/mission state')
             self._update_history("cycle", self.previous('cycle'))
             
         elif phase in ["hmPostMsn","hmMidMsn", "hmUsrDock"]:
-            self.timer('ignore_run', True, 10)
+            self._set_timer('ignore_run', True, 10)
             self.current_state = ROOMBA_STATES[phase]
             
         elif self.changed('cycle'): #if mission has changed
             if mission != 'none':
                 self.current_state = ROOMBA_STATES["new"]
-                self.timers['start'] = time.time()
-                self.mapper.reset_map(self._get_mission_map())
+                self._new_mission_start_time = time.time()
+                self._mapper.reset_map(self._get_mission_map())
                 if isinstance(self.sku, str) and self.sku[0].lower() in ['i', 's', 'm']:
                     #self.timer('ignore_coordinates', True, 30)  #ignore updates for 30 seconds at start of new mission
                     pass
             else:
-                self.timers.pop('start', None)
+                self._new_mission_start_time = None
                 if self.bin_full:
                     self.current_state = ROOMBA_STATES["cancelled"]
                 else:
                     self.current_state = ROOMBA_STATES["completed"]
-                self.timer('ignore_run', True, 5)  #still get bogus 'run' states after mission complete.
+                self._set_timer('ignore_run', True, 5)  #still get bogus 'run' states after mission complete.
             
         elif phase == "charge" and self.rechrgM:
             if self.bin_full:
@@ -730,7 +727,7 @@ class Roomba:
 
         #draw the map, forcing a redraw if needed
         if current_mission:
-            self.mapper.update_map(current_mission != self.current_state)
+            self._mapper.update_map(current_mission != self.current_state)
 
     def _update_flags(self):
         if not self.bin_full:
@@ -762,7 +759,7 @@ class Roomba:
             self.set_flags('cancelled')
 
         elif self.current_state == ROOMBA_STATES["hmMidMsn"]:
-            if not self.is_set('ignore_run'):
+            if not self.timer_active('ignore_run'):
                 if self.bin_full:
                     self.set_flags('bin_full')
                 else:

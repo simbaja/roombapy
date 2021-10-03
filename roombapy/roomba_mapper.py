@@ -31,6 +31,12 @@ try:
     HAVE_PIL = True
 except ImportError:
     print("PIL module not found, maps are disabled")
+
+def _get_mapper_asset(path: str, resource: str):
+    if path.startswith("{PKG}"):
+        return os.path.normpath(os.path.join(os.path.dirname(__file__), path.replace("{PKG}","."), resource))
+    else:
+        return os.path.normpath(os.path.join(path, resource))
         
 transparent = (0, 0, 0, 0)  #transparent color
 
@@ -116,23 +122,16 @@ def validate_color(color, default) -> Tuple[int,int,int,int]:
     except:
         return default
 
-def _get_mapper_asset(path: str, resource: str):
-    if path[0] == ".":
-        return os.path.normpath(os.path.join(os.path.dirname(__file__), path, resource))
-    else:
-        return os.path.normpath(os.path.join(path, resource))
-
 class icons():
     '''
     Roomba icons object
     '''
-    def __init__(self, base_icon=None, angle=0, fnt=None, size=(50,50), log=None):
+    def __init__(self, base_icon=None, font=None, size=(50,50), log=None):
         if log:
             self.log = log
         else:
             self.log = logging.getLogger("Roomba.{}".format(__name__))
-        self.angle = angle
-        self.fnt = fnt
+        self.font = font
         self.size = size
         self.base_icon = base_icon
         if self.base_icon is None:
@@ -154,11 +153,8 @@ class icons():
         return self.icons.get(name)
                         
     def set_font(self, fnt):
-        self.fnt = fnt
+        self.font = fnt
         self.init_dict()
-        
-    def set_angle(self, angle):
-        self.angle = angle
         
     def create_default_icon(self, name, size=None):
         self.icons[name] = self.create_icon(name, size)
@@ -170,7 +166,6 @@ class icons():
             icon = Image.open(filename).convert('RGBA').resize(
                 size,Image.ANTIALIAS)
             icon = make_transparent(icon)
-            icon = icon.rotate(self.angle, expand=False)
             self.icons[name] = icon
             return True
         except IOError as e:
@@ -211,46 +206,44 @@ class icons():
             draw_icon.pieslice([(5,5),(icon.size[0]-5,icon.size[1]-5)],
                 355, 5, fill="red", outline="red")
         elif icon_name == "cancelled":
-            if self.fnt is not None:
-                draw_icon.text((4,-4), "X", font=self.fnt, fill=(255,0,0,255))
+            if self.font is not None:
+                draw_icon.text((4,-4), "X", font=self.font, fill=(255,0,0,255))
         elif icon_name == "stuck":
             draw_icon.polygon([(
                 icon.size[0]//2,icon.size[1]), (0, 0), (0,icon.size[1])],
                 fill = 'red')
-            if self.fnt is not None:
-                draw_icon.text((4,-4), "!", font=self.fnt,
+            if self.font is not None:
+                draw_icon.text((4,-4), "!", font=self.font,
                     fill=(255,255,255,255))
         elif icon_name == "bin full":
             draw_icon.rectangle([
                 icon.size[0]-10, icon.size[1]-10,
                 icon.size[0]+10, icon.size[1]+10],
                 fill = "grey")
-            if self.fnt is not None:
-                draw_icon.text((4,-4), "F", font=self.fnt,
+            if self.font is not None:
+                draw_icon.text((4,-4), "F", font=self.font,
                     fill=(255,255,255,255))
         elif icon_name == "tank low":
             draw_icon.rectangle([
                 icon.size[0]-10, icon.size[1]-10,
                 icon.size[0]+10, icon.size[1]+10],
                 fill = "blue")
-            if self.fnt is not None:
-                draw_icon.text((4,-4), "L", font=self.fnt,
+            if self.font is not None:
+                draw_icon.text((4,-4), "L", font=self.font,
                     fill=(255,255,255,255))
         elif icon_name == "battery":
             draw_icon.rectangle([icon.size[0]-10, icon.size[1]-10,
                 icon.size[0]+10,icon.size[1]+10], fill = "orange")
-            if self.fnt is not None:
-                draw_icon.text((4,-4), "B", font=self.fnt,
+            if self.font is not None:
+                draw_icon.text((4,-4), "B", font=self.font,
                     fill=(255,255,255,255))
         elif icon_name == "home":
             draw_icon.rectangle([0,0,32,32], fill="red", outline="black")
-            if self.fnt is not None:
-                draw_icon.text((4,-4), "D", font=self.fnt,
+            if self.font is not None:
+                draw_icon.text((4,-4), "D", font=self.font,
                     fill=(255,255,255,255))
         else:
             return None
-        #rotate icon 180 degrees
-        icon = icon.rotate(180-self.angle, expand=False)
         return icon
 
 class RoombaPosition(NamedTuple):
@@ -326,7 +319,7 @@ class RoombaMapper:
         path_width = DEFAULT_PATH_WIDTH,
         text_color = DEFAULT_TEXT_COLOR,
         text_bg_color = DEFAULT_TEXT_BG_COLOR,
-        assets_path = "./assets"
+        assets_path = "{PKG}/assets"
     ):
         self.log = logging.getLogger(__name__)
         self.roomba = roomba
@@ -349,7 +342,7 @@ class RoombaMapper:
 
         #generate the default icons
         self.icons: dict[str,icons] = {}
-        self.icons["default"] = icons(base_icon=None, angle=0, fnt=self.font, size=(32,32), log=self.log)
+        self.icons["default"] = icons(base_icon=None, font=self.font, size=(32,32), log=self.log)
 
         #mapping variables
         self._map: RoombaMap = None
@@ -409,7 +402,7 @@ class RoombaMapper:
 
     def add_icon_set(self,
         name: str,
-        icon_path: str = "./assets",                    
+        icon_path: str = "{PKG}/assets",                    
         home_icon_file: str = "home.png",
         roomba_icon_file: str = "roomba.png",
         roomba_error_file: str = "roombaerror.png",
@@ -423,7 +416,7 @@ class RoombaMapper:
             self.log.error("Icon sets must have names")
             return
 
-        i = icons(base_icon=None, angle=0, fnt=self.font, size=(32,32), log=self.log)
+        i = icons(base_icon=None, font=self.font, size=(32,32), log=self.log)
 
         if roomba_icon_file:
             i.load_icon_file('roomba', _get_mapper_asset(icon_path, roomba_icon_file), roomba_size)
@@ -457,9 +450,9 @@ class RoombaMapper:
         if not self.map_enabled:
             return
 
-        if self.roomba.is_set('update_after_completed') and not force_redraw:
+        if self.roomba.timer_active('update_after_completed') and not force_redraw:
             self.log.info('MAP [Update]: Skipping (mission complete), resume in {}s'
-                .format(self.roomba.when_run('update_after_completed')))
+                .format(self.roomba.timer_duration('update_after_completed')))
             return
 
         if (self.roomba.changed('pose') or self.roomba.changed('phase') or 
@@ -640,15 +633,15 @@ class RoombaMapper:
 
         #add the problem icon (pick one in a priority order)
         problem_icon = None
-        if self.roomba.flags.get('stuck'):
+        if self.roomba._flags.get('stuck'):
             problem_icon = icon_set.icons['stuck']
-        elif self.roomba.flags.get('cancelled'):
+        elif self.roomba._flags.get('cancelled'):
             problem_icon = icon_set.icons['cancelled']
-        elif self.roomba.flags.get('bin_full'):
+        elif self.roomba._flags.get('bin_full'):
             problem_icon = icon_set.icons['bin full']
-        elif self.roomba.flags.get('battery_low'):
+        elif self.roomba._flags.get('battery_low'):
             problem_icon = icon_set.icons['battery']
-        elif self.roomba.flags.get('tank_low'):
+        elif self.roomba._flags.get('tank_low'):
             problem_icon = icon_set.icons['tank low']
 
         if problem_icon:
@@ -734,7 +727,7 @@ class RoombaMapper:
             show_time = True
         elif self.roomba.current_state == ROOMBA_STATES["hmMidMsn"]:
             display_state = "Docking"
-            if not self.roomba.is_set('ignore_run'):
+            if not self.roomba.timer_active('ignore_run'):
                 display_attributes = f"Bat: {self.roomba.batPct}%, Bin Full: {self.roomba.bin_full}"
         elif self.roomba.current_state == ROOMBA_STATES["hmUsrDock"]:
             display_state = "User Docking"
