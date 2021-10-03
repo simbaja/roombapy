@@ -691,7 +691,7 @@ class RoombaMapper:
             display_attributes = f"{self.roomba.mssnM}m, \
                              Bat: {self.roomba.batPct}%"
         elif self.roomba.current_state == ROOMBA_STATES["hmPostMsn"]:
-            display_state = "Final Docking"
+            display_state = "Returning Home"
             show_time = True
         elif self.roomba.current_state == ROOMBA_STATES["evac"]:
             display_state = "Emptying Bin"
