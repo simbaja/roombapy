@@ -91,7 +91,6 @@ class Roomba:
         #create the mapper
         self._mapper = RoombaMapper(self)
         self._history = {}
-        self._timers = {}
         self._flags = {}
         self._new_mission_start_time: float = None
 
@@ -163,9 +162,6 @@ class Roomba:
         start_time = self.get_property("mssnStrtTm")
         if start_time:
             return int((datetime.now() - datetime.fromtimestamp(start_time)).total_seconds()//60)
-        start = self._timers.get('start')
-        if start:
-            return int((time.time()-start)//60)
         return None
         
     @property
@@ -219,6 +215,15 @@ class Roomba:
     @property
     def max_map_coords(self):
         return self._mapper.max_coords
+
+    @property
+    def docked(self):
+        return self.current_state in [
+            ROOMBA_STATES["charge"],
+            ROOMBA_STATES["recharge"],
+            ROOMBA_STATES["dockend"],
+            ROOMBA_STATES["evac"]
+        ]
 
     def register_on_message_callback(self, callback):
         self.on_message_callbacks.append(callback)
@@ -465,24 +470,6 @@ class Roomba:
         else:
             self._flags = {}
 
-    def timer_active(self, name) -> bool:
-        return self._timers.get(name, {}).get('value', False)
-        
-    def timer_duration(self, name) -> int:
-        th = self._timers.get(name, {}).get('reset', None)
-        if th:
-            return max(0, int(th._when - self.loop.time()))
-        return 0
-    
-    def _set_timer(self, name, value=False, duration=10):
-        self._timers.setdefault(name, {})
-        self._timers[name]['value'] = value
-        self.log.info('Set {} to: {}'.format(name, value))
-        if self._timers[name].get('reset'):
-            self._timers[name]['reset'].cancel()    
-        if value:
-            self._timers[name]['reset'] = self.loop.call_later(duration, self._set_timer, name)  #reset reset timer in duration seconds
-
     def _update_history(self, property, value=None, cap=False):
         '''
         keep previous value
@@ -681,66 +668,105 @@ class Roomba:
                                             self.rechrgM,
                                             self.changed('pose')))
 
-        if phase == "charge":
-            #self.set_history('pose', self.zero_pose())
-            current_mission = None
-            
-        if self.current_state == ROOMBA_STATES["new"] and phase != 'run':
-            self.log.info('waiting for run state for New Missions')
-            if time.time() - self._new_mission_start_time >= 20:
-                self.log.warning('Timeout waiting for run state')
-                self.current_state = ROOMBA_STATES[phase]
+        try:
+            if (self.mssnM is None
+                and self.phase == "charge"
+                and (
+                    self.current_state == ROOMBA_STATES["pause"]
+                    or self.current_state == ROOMBA_STATES["recharge"]
+                )
+            ):
+                self.current_state = ROOMBA_STATES["cancelled"]
+        except KeyError:
+            pass
 
-        elif phase == "run" and (self.timer_active('ignore_run') or mission == 'none'):
-            self.log.info('Ignoring bogus run state')
-            
-        elif phase == "charge" and mission == 'none' and self.timer_active('ignore_run'):
-            self.log.info('Ignoring bogus charge/mission state')
-            self._update_history("cycle", self.previous('cycle'))
-            
-        elif phase in ["hmPostMsn","hmMidMsn", "hmUsrDock"]:
-            self._set_timer('ignore_run', True, 10)
-            self.current_state = ROOMBA_STATES[phase]
-            
-        elif self.changed('cycle'): #if mission has changed
-            if mission != 'none':
-                self.current_state = ROOMBA_STATES["new"]
-                self._new_mission_start_time = time.time()
-                self._mapper.reset_map(self._get_mission_map())
-                if isinstance(self.sku, str) and self.sku[0].lower() in ['i', 's', 'm']:
-                    #self.timer('ignore_coordinates', True, 30)  #ignore updates for 30 seconds at start of new mission
-                    pass
-            else:
-                self._new_mission_start_time = None
-                if self.bin_full:
-                    self.current_state = ROOMBA_STATES["cancelled"]
-                else:
-                    self.current_state = ROOMBA_STATES["completed"]
-                self._set_timer('ignore_run', True, 5)  #still get bogus 'run' states after mission complete.
-            
-        elif phase == "charge" and self.rechrgM:
-            if self.bin_full:
-                self.current_state = ROOMBA_STATES["pause"]
-            else:
-                self.current_state = ROOMBA_STATES["recharge"]
-            
+        if (
+            self.current_state == ROOMBA_STATES["charge"]
+            and self.phase == "run"
+        ):
+            self.current_state = ROOMBA_STATES["new"]
+            self._new_mission_start_time = time.time()
+            self._mapper.reset_map(self._get_mission_map())
+        elif (
+            self.current_state == ROOMBA_STATES["run"]
+            and self.phase == "hmMidMsn"
+        ):
+            self.current_state = ROOMBA_STATES["dock"]
+        elif (
+            self.current_state == ROOMBA_STATES["dock"]
+            and self.phase == "charge"
+        ):
+            self.current_state = ROOMBA_STATES["recharge"]
+        elif (
+            self.current_state == ROOMBA_STATES["recharge"]
+            and self.phase == "charge"
+            and self.bin_full
+        ):
+            self.current_state = ROOMBA_STATES["pause"]
+        elif (
+            self.current_state == ROOMBA_STATES["run"]
+            and self.phase == "charge"
+        ):
+            self.current_state = ROOMBA_STATES["recharge"]
+        elif (
+            self.current_state == ROOMBA_STATES["recharge"]
+            and self.phase == "run"
+        ):
+            self.current_state = ROOMBA_STATES["pause"]
+        elif (
+            self.current_state == ROOMBA_STATES["pause"]
+            and self.phase == "charge"
+            and self.batPct != "100"            
+        ):
+            self.current_state = ROOMBA_STATES["pause"]
+            # so that we will draw map and can update recharge time
+            current_mission = None
+        elif (
+            self.current_state == ROOMBA_STATES["charge"]
+            and self.phase == "charge"
+            and self.batPct != "100"
+        ):
+            # so that we will draw map and can update charge status
+            current_mission = None
+        elif (
+            self.current_state == ROOMBA_STATES["stop"]
+            or self.current_state == ROOMBA_STATES["pause"]
+        ) and self.phase == "hmUsrDock":
+            self.current_state = ROOMBA_STATES["cancelled"]
+        elif (
+            self.current_state == ROOMBA_STATES["hmUsrDock"]
+            or self.current_state == ROOMBA_STATES["cancelled"]
+        ) and self.phase == "charge":
+            self.current_state = ROOMBA_STATES["dockend"]
+        elif (
+            self.current_state == ROOMBA_STATES["hmPostMsn"]
+            and self.phase == "charge"
+        ):
+            self.current_state = ROOMBA_STATES["dockend"]
+        elif (
+            self.current_state == ROOMBA_STATES["dockend"]
+            and self.phase == "charge"
+        ):
+            self.current_state = ROOMBA_STATES["charge"]
         else:
-            try:
-                self.current_state = ROOMBA_STATES[phase]
-            except KeyError:
+            if self.phase not in ROOMBA_STATES:
                 self.log.error(
                     "Can't find state %s in predefined Roomba states, "
                     "please create a new issue: "
                     "https://github.com/pschmitt/roombapy/issues/new",
-                    phase,
+                    self.phase,
                 )
                 self.current_state = None
+            else:
+                self.current_state = ROOMBA_STATES[
+                    self.phase
+                ]
 
         if self.current_state != current_mission:
-            self.log.info("updated state to: {}".format(self.current_state))
+            self.log.debug("State updated to: %s", self.current_state)
 
         #draw the map, forcing a redraw if needed
-        if current_mission:
+        if self.current_state:
             self._mapper.update_map(current_mission != self.current_state)
 
     def _update_flags(self):
@@ -773,11 +799,10 @@ class Roomba:
             self.set_flags('cancelled')
 
         elif self.current_state == ROOMBA_STATES["hmMidMsn"]:
-            if not self.timer_active('ignore_run'):
-                if self.bin_full:
-                    self.set_flags('bin_full')
-                else:
-                    self.set_flags('battery_low')
+            if self.bin_full:
+                self.set_flags('bin_full')
+            else:
+                self.set_flags('battery_low')
 
     def _update_map_id(self):
         try:

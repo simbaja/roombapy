@@ -113,7 +113,7 @@ def validate_color(color, default) -> Tuple[int,int,int,int]:
 
 class RoombaIconSet:
     def __init__(self, 
-        size: Tuple[int,int] = (50,50), 
+        size: Tuple[int,int] = DEFAULT_ICON_SIZE, 
         show_direction: bool = True,
         log: logging.Logger = None):
 
@@ -321,7 +321,7 @@ class RoombaMapper:
         self.font = font
         if self.font is None:
             try:
-                self.font = ImageFont.truetype(_get_mapper_asset(assets_path, "monaco.ttf"), 40)
+                self.font = ImageFont.truetype(_get_mapper_asset(assets_path, "monaco.ttf"), 30)
             except IOError as e:
                 self.log.warning(f"Error loading font, loading default font")
                 self.font = ImageFont.load_default()
@@ -345,9 +345,13 @@ class RoombaMapper:
     @property
     def roomba_image_pos(self) -> RoombaPosition:       
         try:
+            #roomba sometimes doesn't show the right coords when docked,
+            #override the coordinates just in case
+            if self.roomba.docked:
+                return self._map_coord_to_image_coord(self.roomba.zero_coords())
             return self._history_translated[-1]
         except:
-            return RoombaPosition(0,0,0)
+            return RoombaPosition(None,None,None)
     
     @property
     def origin_image_pos(self) -> RoombaPosition:
@@ -470,11 +474,6 @@ class RoombaMapper:
 
         #if mapping not enabled, nothing to update
         if not self.map_enabled:
-            return
-
-        if self.roomba.timer_active('update_after_completed') and not force_redraw:
-            self.log.info('MAP [Update]: Skipping (mission complete), resume in {}s'
-                .format(self.roomba.timer_duration('update_after_completed')))
             return
 
         if (self.roomba.changed('pose') or self.roomba.changed('phase') or 
@@ -661,8 +660,9 @@ class RoombaMapper:
         icon_set = self._get_icon_set()
 
         #add in the roomba icon
-        rotated = icon_set.roomba.rotate(theta, expand=True)
-        layer.paste(rotated, center_image(x, y, rotated, layer.size))
+        if x and y:
+            rotated = icon_set.roomba.rotate(theta, expand=True)
+            layer.paste(rotated, center_image(x, y, rotated, layer.size))
 
         #add the dock
         dock = self._map_blank_image()
@@ -690,7 +690,7 @@ class RoombaMapper:
         elif self.roomba._flags.get('tank_low'):
             problem_icon = icon_set.tank_low
 
-        if problem_icon:
+        if x and y and problem_icon:
             problem = self._map_blank_image()
             problem.paste(
                 problem_icon,
@@ -773,8 +773,7 @@ class RoombaMapper:
             show_time = True
         elif self.roomba.current_state == ROOMBA_STATES["hmMidMsn"]:
             display_state = "Docking"
-            if not self.roomba.timer_active('ignore_run'):
-                display_attributes = f"Bat: {self.roomba.batPct}%, Bin Full: {self.roomba.bin_full}"
+            display_attributes = f"Bat: {self.roomba.batPct}%, Bin Full: {self.roomba.bin_full}"
         elif self.roomba.current_state == ROOMBA_STATES["hmUsrDock"]:
             display_state = "User Docking"
             show_time = True
