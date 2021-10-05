@@ -1,20 +1,21 @@
-# roombapy
+# roombasdk
 
-[![CI](https://github.com/pschmitt/roombapy/actions/workflows/ci.yaml/badge.svg)](https://github.com/pschmitt/roombapy/actions/workflows/ci.yaml)
-![PyPI](https://img.shields.io/pypi/v/roombapy)
-![PyPI - Downloads](https://img.shields.io/pypi/dm/roombapy)
-![PyPI - License](https://img.shields.io/pypi/l/roombapy)
+[![CI](https://github.com/pschmitt/roombasdk/actions/workflows/ci.yaml/badge.svg)](https://github.com/pschmitt/roombasdk/actions/workflows/ci.yaml)
+![PyPI](https://img.shields.io/pypi/v/roombasdk)
+![PyPI - Downloads](https://img.shields.io/pypi/dm/roombasdk)
+![PyPI - License](https://img.shields.io/pypi/l/roombasdk)
 
 Unofficial iRobot Roomba python library (SDK).
 
-Fork of [NickWaterton/Roomba980-Python](https://github.com/NickWaterton/Roomba980-Python)
+Fork of [NickWaterton/Roomba980-Python](https://github.com/NickWaterton/Roomba980-Python)<br/>
+Fork of [pschmitt/roombapy](https://github.com/pschmitt/roombapy)
 
 This library was created for the [Home Assistant Roomba integration](https://www.home-assistant.io/integrations/roomba/).
 
 # Installation
 
 ```shell
-pip install roombapy
+pip install roombasdk
 ```
 
 # Notes
