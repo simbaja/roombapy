@@ -321,6 +321,7 @@ class RoombaMapper:
         self.font = font
         if self.font is None:
             try:
+                self.log.warning(f"Loading font from: {_get_mapper_asset(assets_path, 'monaco.ttf')}")
                 self.font = ImageFont.truetype(_get_mapper_asset(assets_path, "monaco.ttf"), 30)
             except IOError as e:
                 self.log.warning(f"Error loading font, loading default font")
@@ -335,7 +336,7 @@ class RoombaMapper:
 
         #mapping variables
         self._map: RoombaMap = None
-        self._rendered_map: bytes = None
+        self._rendered_map: Image.Image = None
         self._points_to_skip = DEFAULT_MAP_SKIP_POINTS
         self._points_skipped = 0
         self._max_distance = DEFAULT_MAP_MAX_ALLOWED_DISTANCE
@@ -377,10 +378,6 @@ class RoombaMapper:
             )
         else:
             return (0,0)          
-
-    @property
-    def rendered_map(self) -> bytes:
-        return self._rendered_map
 
     @property
     def bg_color(self) -> Tuple[int,int,int,int]:
@@ -483,6 +480,32 @@ class RoombaMapper:
             if self.roomba.current_state is not None:
                 self._update_state()
                 self._render_map()
+
+    def get_map(self, width: int | None, height: int | None) -> bytes:
+
+        #get the default map
+        map = self._rendered_map
+        output = None
+
+        #if we haven't rendered anything, just return
+        if map is None:
+            return None
+
+        #if we have a requested size, resize it
+        if width and height:
+            map = map.resize((width,height))
+            pass 
+
+        #temporarily save the map
+        try:
+            map.save('c:\\temp\\map.png',"PNG")
+        except:
+            pass          
+
+        #save the internal image
+        with io.BytesIO() as stream:
+            map.save(stream, format="PNG")
+            return stream.getvalue()
 
     def _update_state(self):
         position: dict[str,int] = None
@@ -602,16 +625,8 @@ class RoombaMapper:
         #finally, draw the text
         base = self._draw_text(base)
 
-        #save the internal image
-        with io.BytesIO() as stream:
-            base.save(stream, format="PNG")
-            self._rendered_map = stream.getvalue()
-
-        try:
-            base.save('c:\\temp\\map.png',"PNG")
-        except:
-            pass
-        #call event handlers
+        #save the map
+        self._rendered_map = base
         
     def _map_blank_image(self, color=transparent) -> Image.Image:
         return make_blank_image(self._map.img_width,self._map.img_height,color)
