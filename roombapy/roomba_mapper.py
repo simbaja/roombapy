@@ -622,7 +622,7 @@ class RoombaMapper:
         base = self._draw_roomba(base)
 
         #finally, draw the text
-        base = self._draw_text(base)
+        #base = self._draw_text(base)
 
         #save the map
         self._rendered_map = base
