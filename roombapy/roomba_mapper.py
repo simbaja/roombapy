@@ -481,7 +481,7 @@ class RoombaMapper:
                 self._update_state()
                 self._render_map()
 
-    def get_map(self, width: int | None, height: int | None) -> bytes:
+    def get_map(self, width: int = None, height: int = None) -> bytes:
 
         #get the default map
         map = self._rendered_map

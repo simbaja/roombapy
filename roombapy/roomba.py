@@ -395,7 +395,7 @@ class Roomba:
             cancelled_icon, battery_low_icon,charging_icon,bin_full_icon,tank_low_icon,
             icon_size,show_direction)  
     
-    def get_map(self, width: int | None = None, height: int | None = None):
+    def get_map(self, width: int = None, height: int = None):
         return self._mapper.get_map(width,height)
 
     def dict_merge(self, dct, merge_dct):
