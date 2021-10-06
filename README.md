@@ -46,3 +46,48 @@ To test connection with iRobot:
 ```shell
 $ roomba-connect <ip> <password>
 ```
+
+# Mapping Information
+
+The Roomba position is given as three coordinates: `x`, `y`, and `theta`.  The unit of measure for `x` and `y` is *cm*, theta is *degrees*.  The origin of the mapping coordinates is the position of the dock, which will have coordinates `(0,0,0)`
+
+## Coordinates 
+- Dock Front = -y
+- Dock Back = +y
+- Dock Left = -x
+- Dock Right = -y
+
+```
+         | -y 
+         |
+-x -------------- +x
+         |
+         | +y
+```
+
+### Coordinates for Map Definitions
+
+When defining maps, you will need to define two points, the upper left `p1` and lower right `p2`.  These coordinates would yield the maximum range for the roomba and will be translated into the image coordinate system automatically.
+
+```
+p1       | -y 
+         |
+-x -------------- +x
+         |
+         | +y   p2
+```
+
+## Degrees
+
+Roomba reports positive degrees when turning left, and negative degrees when turning right, yielding a counter-clockwise direction.
+
+```
+         0
+         | 
+         |
+90 -------------- -90
+         |
+         |
+      -180/180    
+```
+

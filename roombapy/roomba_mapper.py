@@ -259,8 +259,8 @@ class RoombaMap:
         icon_set: str = None):
 
         self.log = logging.getLogger(__name__)
-        self.id = id,
-        self.name = name,
+        self.id = id
+        self.name = name
         self.coords_start = coords_start
         self.coords_end = coords_end
         self.angle = angle
@@ -494,12 +494,6 @@ class RoombaMapper:
         if width and height:
             map = map.resize((width,height))
             pass 
-
-        #temporarily save the map
-        try:
-            map.save('c:\\temp\\map.png',"PNG")
-        except:
-            pass          
 
         #save the internal image
         with io.BytesIO() as stream:
