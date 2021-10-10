@@ -209,11 +209,11 @@ class Roomba:
         return self.get_property("regions")
 
     @property
-    def min_map_coords(self):
+    def map_min_coords(self):
         return self._mapper.min_coords
     
     @property
-    def max_map_coords(self):
+    def map_max_coords(self):
         return self._mapper.max_coords
 
     @property
