@@ -202,7 +202,7 @@ class RoombaMapper:
 
         #make sure we have a map
         if not self._map:
-            self._map = RoombaMap("default","default")
+            self._map = RoombaMap("default",None)
 
         #generate the base on which other layers will be composed
         base = self._map_blank_image(color=self._render_params.bg_color)
