@@ -1,3 +1,7 @@
+import os.path
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
 from roombapy import RoombaDiscovery, RoombaFactory
 from roombapy.roomba_mapper import RoombaMap
 from samples.secrets import ROOMBA_IP, ROOMBA_PW

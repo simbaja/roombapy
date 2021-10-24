@@ -6,35 +6,6 @@ import time
 from typing import TYPE_CHECKING, NamedTuple, Optional, Tuple
 import textwrap
 
-if TYPE_CHECKING:
-    from .roomba import Roomba
-
-from roombapy.const import (
-    DEFAULT_BG_COLOR,
-    DEFAULT_ICON_BATTERY,
-    DEFAULT_ICON_BIN_FULL,
-    DEFAULT_ICON_CANCELLED,
-    DEFAULT_ICON_CHARGING,
-    DEFAULT_ICON_ERROR,
-    DEFAULT_ICON_HOME,
-    DEFAULT_ICON_PATH,
-    DEFAULT_ICON_ROOMBA,
-    DEFAULT_ICON_SIZE,
-    DEFAULT_ICON_TANK_LOW,
-    DEFAULT_IMG_HEIGHT,
-    DEFAULT_IMG_WIDTH,
-    DEFAULT_MAP_ANGLE,
-    DEFAULT_MAP_MAX_ALLOWED_DISTANCE,
-    DEFAULT_MAP_MAX_COORDS,
-    DEFAULT_MAP_MIN_COORDS,
-    DEFAULT_PATH_COLOR,
-    DEFAULT_PATH_WIDTH,
-    DEFAULT_TEXT_BG_COLOR,
-    DEFAULT_TEXT_COLOR, 
-    ROOMBA_STATES, 
-    DEFAULT_MAP_SKIP_POINTS
-)
-
 # Import trickery
 global HAVE_PIL
 HAVE_PIL = False
@@ -45,382 +16,34 @@ try:
 except ImportError:
     print("PIL module not found, maps are disabled")
 
-def _get_mapper_asset(path: str, resource: str):
-    if path.startswith("{PKG}"):
-        return os.path.normpath(os.path.join(os.path.dirname(__file__), path.replace("{PKG}","."), resource))
-    else:
-        return os.path.normpath(os.path.join(path, resource))
-        
-transparent = (0, 0, 0, 0)  #transparent color
+if TYPE_CHECKING:
+    from ..roomba import Roomba
 
-def clamp(num, min_value, max_value):
-   return max(min(num, max_value), min_value)
-
-def interpolate(value, in_range, out_range) -> float:
-    
-    #handle inverted ranges
-    invert = False
-    if in_range[0] > in_range[1]:
-        in_range = in_range[1], in_range[0]
-        invert = not invert
-    if out_range[0] > out_range[1]:
-        in_range = out_range[1], out_range[0]
-        invert = not invert
-
-    #make sure it's in the range
-    value = clamp(value, in_range[0], in_range[1])
-
-    out = float(value - in_range[0]) / float(in_range[1] - in_range[0]) * float(out_range[1] - out_range[0])
-    if invert:
-        out = float(out_range[1]) - out
-
-    return out
-
-def rotate(x, y, angle, invert_x: bool = False, invert_y: bool = False) -> Tuple[float,float]:
-    xx = x*math.cos(math.radians(angle)) - \
-         y*math.sin(math.radians(angle))
-    yy = x*math.sin(math.radians(angle)) + \
-         y*math.cos(math.radians(angle))    
-    
-    if invert_x:
-        xx = x - (xx - x)
-    if invert_y:
-        yy = y - (yy - y)
-    return xx, yy
-
-def make_blank_image(width, height, color=transparent) -> Image.Image:
-    return Image.new('RGBA',(width,height), color)
-
-def transparent_paste(base_image: Image.Image, overlay_image: Image.Image, position: Tuple = None):
-    '''
-    needed because PIL pasting of transparent images gives weird results
-    '''
-    image = make_blank_image(base_image.size[0],base_image.size[1])
-    image.paste(overlay_image,position)
-    base_image = Image.alpha_composite(base_image, image)
-    return base_image
-
-def center_image(ox: int, oy: int, image: Image.Image, bounds: Tuple[int,int]) -> Tuple[int,int]:
-    xx, yy = (ox - image.size[0] // 2, oy - image.size[1] // 2)
-    if bounds:
-        xx = clamp(xx, 0, bounds[0])
-        yy = clamp(yy, 0, bounds[1])
-        
-    return (xx, yy)
-            
-def validate_color(color, default) -> Tuple[int,int,int,int]:      
-    try:
-        return ImageColor.getcolor(color,"RGBA")
-    except:
-        return default
-
-class RoombaIconSet:
-    def __init__(self, 
-        size: Tuple[int,int] = DEFAULT_ICON_SIZE, 
-        show_direction: bool = True,
-        log: logging.Logger = None):
-
-        if log:
-            self._log = log
-        else:
-            self._log = logging.getLogger(f"Roomba.{__name__}")
-        
-        self.size = size
-        self.show_direction = show_direction
-        self._icons: dict[str,Image.Image] = {}
-        self._load_defaults()
-
-    @property
-    def roomba(self) -> Image.Image:
-        return self._icons["roomba"]
-    
-    @roomba.setter
-    def roomba(self, value):
-        self._set_icon("roomba", value)
-
-    @property
-    def error(self) -> Image.Image:
-        return self._icons["error"]
-    
-    @error.setter
-    def error(self, value):
-        self._set_icon("error", value)
-    
-    @property
-    def cancelled(self) -> Image.Image:
-        return self._icons["cancelled"]
-    
-    @cancelled.setter
-    def cancelled(self, value):
-        self._set_icon("cancelled", value)
-
-    @property
-    def battery_low(self) -> Image.Image:
-        return self._icons["battery-low"]
-    
-    @battery_low.setter
-    def battery_low(self, value):
-        self._set_icon("battery-low", value)
-
-    @property
-    def charging(self) -> Image.Image:
-        return self._icons["charging"]
-    
-    @charging.setter
-    def charging(self, value):
-        self._set_icon("charging", value)
-
-    @property
-    def bin_full(self) -> Image.Image:
-        return self._icons["bin-full"]
-    
-    @bin_full.setter
-    def bin_full(self, value):
-        self._set_icon("bin-full", value)
-
-    @property
-    def tank_low(self) -> Image.Image:
-        return self._icons["tank-low"]
-    
-    @tank_low.setter
-    def tank_low(self, value):
-        self._set_icon("tank-low", value)
-
-    @property
-    def home(self) -> Image.Image:
-        return self._icons["home"]
-    
-    @home.setter
-    def home(self, value):
-        self._set_icon("home", value)
-
-    def _load_defaults(self):
-        self._load_icon_file("roomba", _get_mapper_asset(DEFAULT_ICON_PATH, DEFAULT_ICON_ROOMBA))
-        self._load_icon_file("error", _get_mapper_asset(DEFAULT_ICON_PATH, DEFAULT_ICON_ERROR))
-        self._load_icon_file("cancelled", _get_mapper_asset(DEFAULT_ICON_PATH, DEFAULT_ICON_CANCELLED))
-        self._load_icon_file("battery-low", _get_mapper_asset(DEFAULT_ICON_PATH, DEFAULT_ICON_BATTERY))
-        self._load_icon_file("charging", _get_mapper_asset(DEFAULT_ICON_PATH, DEFAULT_ICON_CHARGING))
-        self._load_icon_file("bin-full", _get_mapper_asset(DEFAULT_ICON_PATH, DEFAULT_ICON_BIN_FULL))
-        self._load_icon_file("tank-low", _get_mapper_asset(DEFAULT_ICON_PATH, DEFAULT_ICON_TANK_LOW))
-        self._load_icon_file("home", _get_mapper_asset(DEFAULT_ICON_PATH, DEFAULT_ICON_HOME))
-
-    def _set_icon(self, name, value):
-        if value is None:
-            return    
-        if isinstance(value, str):
-            self._load_icon_file(name, value)
-            self._draw_direction(name)
-        elif isinstance(value, Image.Image):
-            resized = value.convert('RGBA').resize(self.size,Image.ANTIALIAS)
-            self._icons[name] = resized
-            self._draw_direction(name)
-        else:
-            raise ValueError()
-
-    def _load_icon_file(self, name, filename, size=None):
-        try:
-            if not size:
-                size = self.size
-            icon = Image.open(filename).convert('RGBA').resize(
-                size,Image.ANTIALIAS)
-                    
-            self._icons[name] = icon
-        except IOError as e:
-            self._log.warning(f'Error loading icon file: {filename}: {e}')
-
-    def _draw_direction(self, name):
-        icon = self._icons[name]
-        if name == "roomba" and self.show_direction:
-            draw_icon = ImageDraw.Draw(icon)
-            draw_icon.pieslice([(5,5),(icon.size[0]-5,icon.size[1]-5)],
-                265, 275, fill="red", outline="red")
+from ..const import ROOMBA_STATES
+from .const import (
+    DEFAULT_ICON_SIZE,
+    DEFAULT_MAP_MAX_ALLOWED_DISTANCE,
+    DEFAULT_MAP_SKIP_POINTS
+)
+from .math_helpers import clamp, rotate, interpolate
+from .image_helpers import transparent, make_blank_image, center_image
+from .misc_helpers import get_mapper_asset
+from .roomba_icon_set import RoombaIconSet
+from .roomba_map_device import RoombaMapDevice
+from .roomba_map import RoombaMap
 
 class RoombaPosition(NamedTuple):
     x: int
     y: int
     theta: int
 
-class RoombaMap:
-    _id: str
-    _name: str
-    _coords_start: Tuple[int,int] = DEFAULT_MAP_MIN_COORDS
-    _coords_end: Tuple[int,int] = DEFAULT_MAP_MAX_COORDS
-    _angle: float = DEFAULT_MAP_ANGLE
-    _floorplan: Image.Image = None
-    _walls: Image.Image = None
-    icon_set: str = None
+class MapRenderParameters(NamedTuple):
+    icon_set: str
+    device: str
+    bg_color: Tuple[int,int,int,int]
+    path_color: Tuple[int,int,int,int]
+    path_width: int
     
-    def __init__(
-        self, 
-        id,
-        name,
-        coords_start: Tuple[int,int] = DEFAULT_MAP_MIN_COORDS,
-        coords_end: Tuple[int,int] = DEFAULT_MAP_MAX_COORDS,
-        angle: float = DEFAULT_MAP_ANGLE,
-        floorplan: str = None,
-        walls: str = None,
-        icon_set: str = None,
-        bg_color = DEFAULT_BG_COLOR,
-        path_color = DEFAULT_PATH_COLOR,
-        path_width = DEFAULT_PATH_WIDTH,
-        text_color = DEFAULT_TEXT_COLOR,
-        text_bg_color = DEFAULT_TEXT_BG_COLOR):
-
-        self._log = logging.getLogger(__name__)
-        self._id = id
-        self._name = name
-        self.coords_start = coords_start
-        self.coords_end = coords_end
-        self.angle = angle
-        self.icon_set = icon_set
-        self.floorplan = floorplan
-        self.walls = walls
-        self.bg_color = bg_color
-        self.path_color = path_color
-        self.path_width = path_width
-        self.text_color = text_color
-        self.text_bg_color = text_bg_color
-
-    @property
-    def id(self) -> str:
-        return self._id  
-
-    @property
-    def name(self) -> str:
-        return self._name
-
-    @property
-    def coords_start(self) -> Tuple[int,int]:
-        return self._coords_start
-    
-    @coords_start.setter
-    def coords_start(self, value):
-        self._coords_start = self._validate_coords(value, self._coords_start or DEFAULT_MAP_MIN_COORDS)
-
-    @property
-    def coords_end(self) -> Tuple[int,int]:
-        return self._coords_start
-    
-    @coords_end.setter
-    def coords_end(self, value):
-        self._coords_end = self._validate_coords(value, self._coords_end or DEFAULT_MAP_MAX_COORDS)
-
-    @property
-    def angle(self) -> float:
-        return self._angle
-    
-    @angle.setter
-    def angle(self, value):
-        self._angle = self._validate_angle(value, self._angle or DEFAULT_MAP_ANGLE)        
-
-    @property
-    def floorplan(self) -> Image.Image:
-        return self._floorplan
-    
-    @floorplan.setter
-    def floorplan(self, value):
-        self._floorplan = self._set_image(value)
-        if not self._floorplan:
-            self._floorplan = make_blank_image(DEFAULT_IMG_WIDTH, DEFAULT_IMG_HEIGHT)
-
-    @property
-    def walls(self) -> Image.Image:
-        return self._walls
-    
-    @walls.setter
-    def walls(self, value):
-        self._walls = self._set_image(value)        
-
-    @property
-    def bg_color(self) -> Tuple[int,int,int,int]:
-        return self._bg_color
-    
-    @bg_color.setter
-    def bg_color(self, value):
-        self._bg_color = validate_color(value, self._bg_color or DEFAULT_BG_COLOR)
-    
-    @property
-    def path_color(self) -> Tuple[int,int,int,int]:
-        return self._path_color
-    
-    @path_color.setter
-    def path_color(self, value):        
-        self._path_color = validate_color(value, self._path_color or DEFAULT_PATH_COLOR)
-
-    @property
-    def path_width(self) -> int:
-        return self._path_width
-    
-    @path_width.setter
-    def path_width(self, value: Optional[int]) -> int:
-        if value == None:
-            return
-        self._path_width = value
-
-    @property
-    def text_color(self) -> Tuple[int,int,int,int]:
-        return self._text_color
-    
-    @text_color.setter
-    def text_color(self, value):
-        self._text_color = validate_color(value, self._text_color or DEFAULT_TEXT_COLOR)
-
-    @property
-    def text_bg_color(self) -> Tuple[int,int,int,int]:
-        return self._text_bg_color      
-    
-    @text_bg_color.setter
-    def text_bg_color(self, value):
-        self._text_bg_color = validate_color(value, self._text_bg_color or DEFAULT_TEXT_BG_COLOR)
-
-    @property
-    def img_width(self) -> int:
-        if self.floorplan:
-            x, _ = self.floorplan.size
-            return x
-        else:
-            return DEFAULT_IMG_WIDTH
-    
-    @property
-    def img_height(self) -> int:
-        if self.floorplan:
-            _, y = self.floorplan.size
-            return y
-        else:
-            return DEFAULT_IMG_HEIGHT
-
-    def _set_image(self, value):
-        if value is None:
-            return None   
-        if isinstance(value, str):
-            return Image.open(value).convert('RGBA')
-        elif isinstance(value, Image.Image):
-            return value
-        else:
-            self._log.warning(f'Could not load image from {value}')
-            return None      
-
-    def _validate_coords(self, value, default) -> Tuple[int,int]:
-        if value is None:
-            return default
-        if not isinstance(value, tuple):
-            return default
-        if len(value) != 2:
-            return default
-        return value
-
-    def _validate_angle(self, value, default) -> float:
-        if value is None:
-            return default
-        try:
-            v = float(value)
-            v %= 360
-            if v < 0:
-                v += 360
-            return v
-        except:
-            return default
-
 class RoombaMapper:
     def __init__(self, 
         roomba: 'Roomba', 
@@ -437,7 +60,7 @@ class RoombaMapper:
         self.font = font
         if self.font is None:
             try:
-                self.font = ImageFont.truetype(_get_mapper_asset(assets_path, "monaco.ttf"), 30)
+                self.font = ImageFont.truetype(get_mapper_asset(assets_path, "monaco.ttf"), 30)
             except Exception as e:
                 self.log.warning(f"Error loading font, loading default font")
                 self.font = ImageFont.load_default()
@@ -451,6 +74,7 @@ class RoombaMapper:
 
         #mapping variables
         self._map: RoombaMap = None
+        self._device: RoombaMapDevice = None
         self._rendered_map: Image.Image = None
         self._points_to_skip = DEFAULT_MAP_SKIP_POINTS
         self._points_skipped = 0
@@ -533,19 +157,27 @@ class RoombaMapper:
 
         self._icons[name] = i
 
+    def add_map_device(self, name: str, device: RoombaMapDevice):
+        if not name:
+            self.log.error("Devices must have names")
+            return
+
+        self._devices[name] = device
+
     def _get_mapper_asset(self, icon_path: str, icon):
         if isinstance(icon, str):
-            return _get_mapper_asset(icon_path, icon)
+            return get_mapper_asset(icon_path, icon)
         if isinstance(icon, Image.Image):
             return icon
         else:
             return None
 
-    def reset_map(self, map: RoombaMap, points_to_skip: int = DEFAULT_MAP_SKIP_POINTS):
+    def reset_map(self, map: RoombaMap, device: RoombaMapDevice = None, points_to_skip: int = DEFAULT_MAP_SKIP_POINTS):
         self.map_enabled = self.roomba.cap.get("pose", False) and HAVE_PIL        
         self._history = []
         self._history_translated = []
         self._map = map
+        self._device = device
         self._points_to_skip = points_to_skip
         self._points_skipped = 0
 
@@ -682,15 +314,17 @@ class RoombaMapper:
     def _render_map(self):
         """Renders the map"""
 
+        params = self._get_render_parameters()
+
         #generate the base on which other layers will be composed
-        base = self._map_blank_image(color=self.bg_color)
+        base = self._map_blank_image(color=params.bg_color)
 
         #add the floorplan if available
         if self._map.floorplan:
             base = Image.alpha_composite(base, self._map.floorplan)
 
         #draw in the vacuum path
-        base = self._draw_vacuum_path(base)
+        base = self._draw_vacuum_path(base, params)
 
         #draw in the map walls (to hide overspray)
         if self._map.walls:
@@ -705,18 +339,42 @@ class RoombaMapper:
         #save the map
         self._rendered_map = base
         
+    def _get_render_parameters(self) -> MapRenderParameters:
+        icon_set = self._map.icon_set
+        bg_color = self._map.bg_color
+        path_color = self._map.path_color
+        path_width = self._map.path_width
+
+        if self._device:
+            if self._device.icon_set:
+                icon_set = self._device.icon_set
+            if self._device.bg_color:
+                bg_color = self._device.bg_color
+            if self._device.path_color:
+                path_color = self._device.path_color
+            if self._device.path_width:
+                path_width = self._device.path_width
+
+        return MapRenderParameters(
+            icon_set,
+            self._device.blid,
+            bg_color,
+            path_color,
+            path_width
+        )
+
     def _map_blank_image(self, color=transparent) -> Image.Image:
         return make_blank_image(self._map.img_width,self._map.img_height,color)
 
-    def _draw_vacuum_path(self, base: Image.Image) -> Image.Image:
+    def _draw_vacuum_path(self, base: Image.Image, render_params: MapRenderParameters) -> Image.Image:
         if len(self._history_translated) > 1:        
             layer = self._map_blank_image()
             renderer = ImageDraw.Draw(layer)
 
             renderer.line(
                 list(map(lambda p: (p.x,p.y), self._history_translated)),
-                fill=self._map.path_color,
-                width=self._map.path_width,
+                fill=render_params.path_color,
+                width=render_params.path_width,
                 joint="curve"
             )
 
@@ -724,7 +382,7 @@ class RoombaMapper:
         else:
             return base
 
-    def _get_icon_set(self):
+    def _get_icon_set(self, render_params: MapRenderParameters):
         #get the default (should always exist)
         icon_set = self._icons["default"]
 
@@ -734,22 +392,22 @@ class RoombaMapper:
             icon_set = series
 
         #override with the map set if needed
-        if self._map.icon_set:
+        if render_params.icon_set:
             try:
-                icon_set = self._icons[self._map.icon_set]
+                icon_set = self._icons[render_params.icon_set]
             except:
-                self.log.warn(f"Could not load icon set '{self._map.icon_set}' for map.")
+                self.log.warn(f"Could not load icon set '{render_params.icon_set}' for map.")
 
         return icon_set
 
-    def _draw_roomba(self, base: Image.Image) -> Image.Image:
+    def _draw_roomba(self, base: Image.Image, render_params: MapRenderParameters) -> Image.Image:
         layer = self._map_blank_image()
 
         #get the image coordinates of the roomba
         x, y, theta = self.roomba_image_pos
 
         #get the icon set to use
-        icon_set = self._get_icon_set()
+        icon_set = self._get_icon_set(render_params)
 
         #add in the roomba icon
         if x and y:

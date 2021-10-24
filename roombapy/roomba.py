@@ -25,13 +25,19 @@ from collections import OrderedDict
 from collections.abc import Mapping
 from datetime import datetime
 
+from roombapy.mapping import (
+    DEFAULT_ICON_SIZE,
+    RoombaMapper,
+    RoombaMap,
+    RoombaMapDevice
+)
+
 from roombapy.const import (
-    DEFAULT_ICON_SIZE, 
     ROOMBA_ERROR_MESSAGES, 
     ROOMBA_READY_MESSAGES, 
     ROOMBA_STATES
 )
-from roombapy.roomba_mapper import RoombaMap, RoombaMapper
+from roombapy.remote_client import RoombaRemoteClient
 
 MAX_CONNECTION_RETRIES = 3
 
@@ -56,7 +62,7 @@ class Roomba:
     be decoded and published on the designated mqtt client topic.
     """
 
-    def __init__(self, remote_client, continuous=True, delay=1):
+    def __init__(self, remote_client: RoombaRemoteClient, continuous=True, delay=1):
         """Roomba client initialization."""
         self.log = logging.getLogger(__name__)
         self.loop = asyncio.get_event_loop()        
@@ -95,7 +101,8 @@ class Roomba:
         self._new_mission_start_time: float = None
 
         self._pmap_id: str = None
-        self._maps: dict[str,RoombaMap] = {}
+        self._maps: dict[str,RoombaMap] = {}        
+        self._devices: dict[str,RoombaMapDevice] = {}
 
     @property    
     def co_ords(self):
@@ -105,6 +112,10 @@ class Roomba:
                     'y': co_ords['point']['x'],
                     'theta': co_ords['theta']}
         return self.zero_coords()
+
+    @property
+    def blid(self):
+        return self.remote_client.blid
 
     @property
     def current_pmap_id(self):
@@ -375,6 +386,12 @@ class Roomba:
             raise ValueError(map.id)   
         self._maps[map.id] = map
 
+    def add_map_device(self, device: RoombaMapDevice):
+        """Adds a map device"""
+        if not device.blid:
+            raise ValueError(device.blid)   
+        self._devices[device.blid] = device
+
     def add_map_icon_set(
         self,
         name: str,
@@ -534,7 +551,10 @@ class Roomba:
             self.log.warning(
                 "Error looking up not ready message {}".format(e))
             message = "Unknown not ready number: {}".format(not_ready_num)
-        return message        
+        return message  
+
+    def _get_map_device(self) -> RoombaMapDevice:
+        return self._devices.get(self.blid,None)      
 
     def _get_mission_map(self) -> RoombaMap:
         return self._get_map(self._pmap_id)
@@ -689,7 +709,7 @@ class Roomba:
         ):
             self.current_state = ROOMBA_STATES["new"]
             self._new_mission_start_time = time.time()
-            self._mapper.reset_map(self._get_mission_map())
+            self._mapper.reset_map(self._get_mission_map(), self._get_map_device())
         elif (
             self.current_state == ROOMBA_STATES["run"]
             and self.phase == "hmMidMsn"
