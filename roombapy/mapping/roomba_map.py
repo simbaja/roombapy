@@ -29,6 +29,10 @@ class RoombaMap:
     _angle: float = DEFAULT_MAP_ANGLE
     _floorplan: Image.Image = None
     _walls: Image.Image = None
+    _bg_color: Tuple[int,int,int,int] = None
+    _path_color: Tuple[int,int,int,int] = None
+    _text_color: Tuple[int,int,int,int] = None
+    _text_bg_color: Tuple[int,int,int,int] = None
     icon_set: str = None
     device: str = None
     
@@ -81,7 +85,7 @@ class RoombaMap:
 
     @property
     def coords_end(self) -> Tuple[int,int]:
-        return self._coords_start
+        return self._coords_end
     
     @coords_end.setter
     def coords_end(self, value):

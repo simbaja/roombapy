@@ -194,6 +194,10 @@ class RoombaMapper:
     def _initialize_map(self):
         self._render_params = self._get_render_parameters()
 
+        #make sure we have a map
+        if not self._map:
+            self._map = RoombaMap("default","default")
+
         #generate the base on which other layers will be composed
         base = self._map_blank_image(color=self._render_params.bg_color)
 
@@ -365,7 +369,14 @@ class RoombaMapper:
             path_color = DEFAULT_PATH_COLOR
             path_width = DEFAULT_PATH_WIDTH
 
+        if self.roomba.blid:
+            blid = self.roomba.blid
+        else:
+            blid = None
+
         if self._device:
+            if self._device.blid:
+                blid = self._device.blid
             if self._device.icon_set:
                 icon_set = self._device.icon_set
             if self._device.bg_color:
@@ -377,7 +388,7 @@ class RoombaMapper:
 
         return MapRenderParameters(
             icon_set,
-            self._device.blid,
+            blid,
             bg_color,
             path_color,
             path_width
@@ -407,9 +418,10 @@ class RoombaMapper:
         icon_set = self._icons["default"]
 
         #attempt to get the series specific set
-        series = self._icons.get(self.roomba.sku[0],None)            
-        if series:
-            icon_set = series
+        if self.roomba and self.roomba.sku:
+            series = self._icons.get(self.roomba.sku[0],None)            
+            if series:
+                icon_set = series
 
         #override with the map set if needed
         if self._render_params and self._render_params.icon_set:
@@ -420,14 +432,14 @@ class RoombaMapper:
 
         return icon_set
 
-    def _draw_roomba(self, base: Image.Image, render_params: MapRenderParameters) -> Image.Image:
+    def _draw_roomba(self, base: Image.Image) -> Image.Image:
         layer = self._map_blank_image()
 
         #get the image coordinates of the roomba
         x, y, theta = self.roomba_image_pos
 
         #get the icon set to use
-        icon_set = self._get_icon_set(render_params)
+        icon_set = self._get_icon_set()
 
         #add in the roomba icon
         if x and y:
