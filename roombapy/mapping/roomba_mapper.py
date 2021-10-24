@@ -21,9 +21,12 @@ if TYPE_CHECKING:
 
 from ..const import ROOMBA_STATES
 from .const import (
+    DEFAULT_BG_COLOR,
     DEFAULT_ICON_SIZE,
     DEFAULT_MAP_MAX_ALLOWED_DISTANCE,
-    DEFAULT_MAP_SKIP_POINTS
+    DEFAULT_MAP_SKIP_POINTS,
+    DEFAULT_PATH_COLOR,
+    DEFAULT_PATH_WIDTH
 )
 from .math_helpers import clamp, rotate, interpolate
 from .image_helpers import transparent, make_blank_image, center_image
@@ -75,12 +78,17 @@ class RoombaMapper:
         #mapping variables
         self._map: RoombaMap = None
         self._device: RoombaMapDevice = None
+        self._render_params: MapRenderParameters = None
         self._rendered_map: Image.Image = None
+        self._base_rendered_map: Image.Image = None
         self._points_to_skip = DEFAULT_MAP_SKIP_POINTS
         self._points_skipped = 0
         self._max_distance = DEFAULT_MAP_MAX_ALLOWED_DISTANCE
         self._history = []
         self._history_translated: list[RoombaPosition] = []
+
+        #initialize a base map
+        self._initialize_map()
 
     @property
     def roomba_image_pos(self) -> RoombaPosition:       
@@ -181,6 +189,22 @@ class RoombaMapper:
         self._points_to_skip = points_to_skip
         self._points_skipped = 0
 
+        self._initialize_map()
+
+    def _initialize_map(self):
+        self._render_params = self._get_render_parameters()
+
+        #generate the base on which other layers will be composed
+        base = self._map_blank_image(color=self._render_params.bg_color)
+
+        #add the floorplan if available
+        if self._map and self._map.floorplan:
+            base = Image.alpha_composite(base, self._map.floorplan)
+
+        #set our internal variables so that we can get the default
+        self._base_rendered_map = base
+        self._rendered_map = base
+    
     def update_map(self, force_redraw = False):
         """Updates the cleaning map"""
 
@@ -314,17 +338,8 @@ class RoombaMapper:
     def _render_map(self):
         """Renders the map"""
 
-        params = self._get_render_parameters()
-
-        #generate the base on which other layers will be composed
-        base = self._map_blank_image(color=params.bg_color)
-
-        #add the floorplan if available
-        if self._map.floorplan:
-            base = Image.alpha_composite(base, self._map.floorplan)
-
         #draw in the vacuum path
-        base = self._draw_vacuum_path(base, params)
+        base = self._draw_vacuum_path(self._base_rendered_map)
 
         #draw in the map walls (to hide overspray)
         if self._map.walls:
@@ -340,10 +355,16 @@ class RoombaMapper:
         self._rendered_map = base
         
     def _get_render_parameters(self) -> MapRenderParameters:
-        icon_set = self._map.icon_set
-        bg_color = self._map.bg_color
-        path_color = self._map.path_color
-        path_width = self._map.path_width
+        if self._map:
+            icon_set = self._map.icon_set
+            bg_color = self._map.bg_color
+            path_color = self._map.path_color
+            path_width = self._map.path_width
+        else:
+            icon_set = self._get_icon_set()
+            bg_color = DEFAULT_BG_COLOR
+            path_color = DEFAULT_PATH_COLOR
+            path_width = DEFAULT_PATH_WIDTH
 
         if self._device:
             if self._device.icon_set:
@@ -366,15 +387,15 @@ class RoombaMapper:
     def _map_blank_image(self, color=transparent) -> Image.Image:
         return make_blank_image(self._map.img_width,self._map.img_height,color)
 
-    def _draw_vacuum_path(self, base: Image.Image, render_params: MapRenderParameters) -> Image.Image:
+    def _draw_vacuum_path(self, base: Image.Image) -> Image.Image:
         if len(self._history_translated) > 1:        
             layer = self._map_blank_image()
             renderer = ImageDraw.Draw(layer)
 
             renderer.line(
                 list(map(lambda p: (p.x,p.y), self._history_translated)),
-                fill=render_params.path_color,
-                width=render_params.path_width,
+                fill=self._render_params.path_color,
+                width=self._render_params.path_width,
                 joint="curve"
             )
 
@@ -382,7 +403,7 @@ class RoombaMapper:
         else:
             return base
 
-    def _get_icon_set(self, render_params: MapRenderParameters):
+    def _get_icon_set(self):
         #get the default (should always exist)
         icon_set = self._icons["default"]
 
@@ -392,11 +413,11 @@ class RoombaMapper:
             icon_set = series
 
         #override with the map set if needed
-        if render_params.icon_set:
+        if self._render_params and self._render_params.icon_set:
             try:
-                icon_set = self._icons[render_params.icon_set]
+                icon_set = self._icons[self._render_params.icon_set]
             except:
-                self.log.warn(f"Could not load icon set '{render_params.icon_set}' for map.")
+                self.log.warn(f"Could not load icon set '{self._render_params.icon_set}' for map.")
 
         return icon_set
 
