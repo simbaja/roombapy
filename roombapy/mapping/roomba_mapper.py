@@ -124,7 +124,13 @@ class RoombaMapper:
                 max(list(map(lambda p: p["y"], self._history)))
             )
         else:
-            return (0,0)          
+            return (0,0)      
+
+    @property
+    def map_name(self):
+        if self._map and self._map.name:
+            return self._map.name
+        return None
 
     def add_icon_set(self,
         name: str,
@@ -461,15 +467,15 @@ class RoombaMapper:
 
         #add the problem icon (pick one in a priority order)
         problem_icon = None
-        if self.roomba._flags.get('stuck'):
+        if self.roomba.flags.get('stuck'):
             problem_icon = icon_set.error
-        elif self.roomba._flags.get('cancelled'):
+        elif self.roomba.flags.get('cancelled'):
             problem_icon = icon_set.cancelled
-        elif self.roomba._flags.get('bin_full'):
+        elif self.roomba.flags.get('bin_full'):
             problem_icon = icon_set.bin_full
-        elif self.roomba._flags.get('battery_low'):
+        elif self.roomba.flags.get('battery_low'):
             problem_icon = icon_set.battery_low
-        elif self.roomba._flags.get('tank_low'):
+        elif self.roomba.flags.get('tank_low'):
             problem_icon = icon_set.tank_low
 
         if x and y and problem_icon:
@@ -546,7 +552,7 @@ class RoombaMapper:
             display_state = "Starting"
         elif self.roomba.current_state == ROOMBA_STATES["stuck"]:
             expire = self.roomba.expireM
-            expire_text = 'Job Cancel in {expire}m' if expire else 'Job Cancelled'
+            expire_text = f'Job Cancel in {expire}m' if expire else 'Job Cancelled'
             display_state = "Stuck"
             display_attributes = f"{self.roomba.error_message} {expire_text}"
             show_time = True

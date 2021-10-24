@@ -93,13 +93,12 @@ class Roomba:
         self.on_message_callbacks = []
         self.on_disconnect_callbacks = []
         self.client_error = None
-
-        #create the mapper
-        self._mapper = RoombaMapper(self)
-        self._history = {}
-        self._flags = {}
+        self.flags = {}
         self._new_mission_start_time: float = None
 
+        #mapping variables
+        self._mapper = RoombaMapper(self)
+        self._history = {}
         self._pmap_id: str = None
         self._maps: dict[str,RoombaMap] = {}        
         self._devices: dict[str,RoombaMapDevice] = {}
@@ -226,6 +225,10 @@ class Roomba:
     @property
     def map_max_coords(self):
         return self._mapper.max_coords
+
+    @property
+    def map_name(self):
+        return self._mapper.map_name
 
     @property
     def docked(self):
@@ -477,7 +480,7 @@ class Roomba:
         
     def flag_set(self, flag) -> bool:
         try:
-            return self._flags.get(flag, False)
+            return self.flags.get(flag, False)
         except KeyError:
             pass
         return False
@@ -488,11 +491,11 @@ class Roomba:
         if flags:
             for flag in flags:
                 if set:
-                    self._flags[flag] = True
+                    self.flags[flag] = True
                 else:
-                    self._flags.pop(flag, None)
+                    self.flags.pop(flag, None)
         else:
-            self._flags = {}
+            self.flags = {}
 
     def _update_history(self, property, value=None, cap=False):
         '''
