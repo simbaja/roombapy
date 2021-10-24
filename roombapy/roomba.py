@@ -343,7 +343,11 @@ class Roomba:
         )
 
         #update the state machine and history
-        self._update_state_machine()
+        #don't update maps if it's not just a signal update
+        state = json_data.get("state", {}).get("reported", {})
+        should_update_map = len(state) > 1 or "signal" not in state
+        
+        self._update_state_machine(should_update_map)
 
         # call the callback functions
         for callback in self.on_message_callbacks:
@@ -601,7 +605,7 @@ class Roomba:
             formatted_data = payload
         return formatted_data, dict(json_data)
 
-    def _update_state_machine(self):
+    def _update_state_machine(self, should_update_map: bool):
         '''
         Roomba progresses through states (phases), current identified states
         are:
@@ -789,7 +793,7 @@ class Roomba:
             self.log.debug("State updated to: %s", self.current_state)
 
         #draw the map, forcing a redraw if needed
-        if self.current_state:
+        if self.current_state and should_update_map:
             self._mapper.update_map(current_mission != self.current_state)
 
     def _update_flags(self):

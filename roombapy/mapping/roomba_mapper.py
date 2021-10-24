@@ -3,7 +3,7 @@ import math
 import logging
 import os
 import time
-from typing import TYPE_CHECKING, NamedTuple, Optional, Tuple
+from typing import TYPE_CHECKING, NamedTuple, Tuple
 import textwrap
 
 # Import trickery
@@ -11,7 +11,7 @@ global HAVE_PIL
 HAVE_PIL = False
 
 try:
-    from PIL import Image, ImageDraw, ImageFont, ImageColor
+    from PIL import Image, ImageDraw, ImageFont
     HAVE_PIL = True
 except ImportError:
     print("PIL module not found, maps are disabled")
@@ -224,7 +224,6 @@ class RoombaMapper:
 
         #get the default map
         map = self._rendered_map
-        output = None
 
         #if we haven't rendered anything, just return
         if map is None:
